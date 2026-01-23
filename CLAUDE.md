@@ -163,6 +163,20 @@ projectpulse_sop_get(projectId: 10, slug: "git-workflow")
 
 ---
 
+## Available Skills
+
+| Skill | Slug | Category | Description |
+|-------|------|----------|-------------|
+| CLI Error Handling Pattern | `cli-error-handling` | workflow | User-friendly error handling for CLI with actionable messages |
+| Streaming Response Pattern | `streaming-response-pattern` | workflow | Streaming LLM responses with real-time output |
+| Commander.js CLI Pattern | `commander-pattern` | framework | Standard pattern for defining CLI commands |
+| ContextAI SDK RAG Integration | `contextai-rag-integration` | framework | Complete RAG pipeline setup using ContextAI SDK |
+| ContextAI SDK Expert Reference | `contextai-sdk-reference` | reference | Comprehensive API reference for ContextAI SDK |
+| SQLite BLOB Vector Storage | `sqlite-vector-storage` | framework | Storing vector embeddings as BLOBs in SQLite |
+| Zod CLI Validation | `zod-cli-validation` | framework | Validating CLI arguments with Zod schemas |
+
+---
+
 ## Roadmap Workflow (Optional)
 
 **Use roadmap for multi-week projects with phases. Skip for single fixes.**
