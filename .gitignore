@@ -1,0 +1,35 @@
+# Claude Code
+.claude/
+
+# MCP configuration
+.mcp.json
+
+# Project documentation (private)
+SPEC.md
+discussion_file.md
+
+# Node.js
+node_modules/
+dist/
+build/
+
+# Environment
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/
