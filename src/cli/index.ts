@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { GlobalOptions, CommandContext } from './types.js';
+import { createConfigCommand } from './commands/config.js';
 
 // Create the root program
 const program = new Command();
@@ -25,10 +26,12 @@ program
   // Custom help formatting
   .addHelpText('after', `
 ${chalk.dim('Examples:')}
-  ${chalk.cyan('ctx index ./my-project')}     Index a project for searching
-  ${chalk.cyan('ctx ask "How does auth work?"')}  Ask a question across all indexed projects
-  ${chalk.cyan('ctx search "login function"')}    Search for code patterns
-  ${chalk.cyan('ctx list')}                     List all indexed projects
+  ${chalk.cyan('ctx index ./my-project')}        Index a project for searching
+  ${chalk.cyan('ctx ask "How does auth work?"')}   Ask a question across all indexed projects
+  ${chalk.cyan('ctx search "login function"')}     Search for code patterns
+  ${chalk.cyan('ctx list')}                      List all indexed projects
+  ${chalk.cyan('ctx config list')}               Show all configuration
+  ${chalk.cyan('ctx config set search.top_k 20')} Change a setting
 
 ${chalk.dim('Documentation:')}
   https://github.com/your-org/context-expert
@@ -170,6 +173,13 @@ program
       ctx.log(`Would search for: ${chalk.cyan(query)}`);
     }
   });
+
+// ============================================================================
+// REAL COMMANDS (implemented)
+// ============================================================================
+
+// Config command - manage ~/.ctx/config.toml
+program.addCommand(createConfigCommand(() => createContext(getGlobalOptions())));
 
 // ============================================================================
 // ERROR HANDLING & EXECUTION
