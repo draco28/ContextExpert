@@ -17,6 +17,29 @@
 // Re-export types for library consumers
 export type { GlobalOptions, CommandContext } from './cli/types.js';
 
+// Re-export database module
+export {
+  getDb,
+  closeDb,
+  getDbPath,
+  getCtxDir,
+  runMigrations,
+  hasPendingMigrations,
+  getAppliedMigrations,
+  generateId,
+  embeddingToBlob,
+  blobToEmbedding,
+} from './database/index.js';
+
+export type {
+  Project,
+  ProjectInput,
+  Chunk,
+  ChunkInput,
+  FileHash,
+  FileHashInput,
+} from './database/index.js';
+
 // Placeholder for the main API class
 // This will be implemented in future tickets
 export class ContextExpert {
