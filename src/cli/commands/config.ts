@@ -12,6 +12,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { loadConfig, getConfigValue, setConfigValue, listConfig, getConfigPath } from '../../config/loader.js';
 import type { CommandContext } from '../types.js';
+import { ConfigError } from '../../errors/index.js';
 
 /**
  * Create the config command with all subcommands
@@ -31,11 +32,10 @@ export function createConfigCommand(getContext: () => CommandContext): Command {
         const value = getConfigValue(key);
 
         if (value === undefined) {
-          ctx.error(`Unknown config key: ${key}`);
-          ctx.log('');
-          ctx.log(`Run ${chalk.cyan('ctx config list')} to see all available keys.`);
-          process.exitCode = 1;
-          return;
+          throw new ConfigError(
+            `Unknown config key: ${key}`,
+            'Run: ctx config list  to see all available keys'
+          );
         }
 
         if (ctx.options.json) {
@@ -46,7 +46,8 @@ export function createConfigCommand(getContext: () => CommandContext): Command {
           ctx.log(formatted);
         }
       } catch (error) {
-        handleConfigError(ctx, error);
+        // Re-throw to let global error handler format it
+        throw error;
       }
     });
 
@@ -66,7 +67,7 @@ export function createConfigCommand(getContext: () => CommandContext): Command {
           ctx.log(`${chalk.green('✓')} Set ${chalk.cyan(key)} = ${chalk.yellow(value)}`);
         }
       } catch (error) {
-        handleConfigError(ctx, error);
+        throw error;
       }
     });
 
@@ -107,7 +108,7 @@ export function createConfigCommand(getContext: () => CommandContext): Command {
           ctx.log(chalk.dim(`Config file: ${getConfigPath()}`));
         }
       } catch (error) {
-        handleConfigError(ctx, error);
+        throw error;
       }
     });
 
@@ -158,7 +159,7 @@ export function createConfigCommand(getContext: () => CommandContext): Command {
           ctx.log(`${chalk.green('✓')} Configuration reset to defaults`);
         }
       } catch (error) {
-        handleConfigError(ctx, error);
+        throw error;
       }
     });
 
@@ -175,17 +176,3 @@ function formatValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/**
- * Handle config errors with user-friendly messages
- */
-function handleConfigError(ctx: CommandContext, error: unknown): void {
-  const message = error instanceof Error ? error.message : 'Unknown error';
-
-  if (ctx.options.json) {
-    console.error(JSON.stringify({ error: message }));
-  } else {
-    ctx.error(message);
-  }
-
-  process.exitCode = 1;
-}

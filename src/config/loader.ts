@@ -15,6 +15,7 @@ import * as os from 'node:os';
 import TOML from '@iarna/toml';
 import { ConfigSchema, PartialConfigSchema, type Config, type PartialConfig } from './schema.js';
 import { DEFAULT_CONFIG, CONFIG_TEMPLATE } from './defaults.js';
+import { ConfigError } from '../errors/index.js';
 
 /**
  * Get the ctx directory path (~/.ctx)
@@ -102,7 +103,10 @@ export function loadConfig(createIfMissing = true): Config {
     parsed = TOML.parse(content);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown parse error';
-    throw new Error(`Invalid TOML in config file: ${message}`);
+    throw new ConfigError(
+      `Invalid TOML in config file: ${message}`,
+      `Fix the syntax in ${configPath} or run: ctx config reset --force`
+    );
   }
 
   // Validate against the partial schema (allows missing fields)
@@ -112,7 +116,10 @@ export function loadConfig(createIfMissing = true): Config {
     const issues = validationResult.error.issues
       .map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`)
       .join('\n');
-    throw new Error(`Invalid configuration:\n${issues}`);
+    throw new ConfigError(
+      `Invalid configuration:\n${issues}`,
+      'Run: ctx config reset --force  to restore defaults'
+    );
   }
 
   // Merge user config with defaults
@@ -160,7 +167,10 @@ export function setConfigValue(key: string, value: string): void {
   // Set the value at the nested path
   const parts = key.split('.');
   if (parts.length === 0) {
-    throw new Error('Invalid config key: empty key');
+    throw new ConfigError(
+      'Invalid config key: empty key',
+      'Run: ctx config list  to see available keys'
+    );
   }
 
   let current = config;
@@ -184,7 +194,10 @@ export function setConfigValue(key: string, value: string): void {
     const issues = validationResult.error.issues
       .map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`)
       .join('\n');
-    throw new Error(`Invalid value for '${key}':\n${issues}`);
+    throw new ConfigError(
+      `Invalid value for '${key}':\n${issues}`,
+      'Run: ctx config list  to see current values and types'
+    );
   }
 
   // Write back to file

@@ -9,6 +9,11 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { GlobalOptions, CommandContext } from './types.js';
 import { createConfigCommand } from './commands/config.js';
+import {
+  handleError,
+  createGlobalErrorHandler,
+  CLIError,
+} from '../errors/index.js';
 
 // Create the root program
 const program = new Command();
@@ -187,28 +192,33 @@ program.addCommand(createConfigCommand(() => createContext(getGlobalOptions())))
 
 // Handle unknown commands gracefully
 program.on('command:*', (operands: string[]) => {
-  const ctx = createContext(getGlobalOptions());
-  ctx.error(`Unknown command: ${operands[0]}`);
-  ctx.log('');
-  ctx.log(`Run ${chalk.cyan('ctx --help')} to see available commands.`);
-  process.exit(1);
+  // Throw a CLIError with a helpful hint
+  throw new CLIError(
+    `Unknown command: ${operands[0]}`,
+    `Run: ctx --help  to see available commands`
+  );
 });
 
 // Parse arguments and execute
 async function main() {
+  // Get options for error handler (need to parse first for --verbose/--json)
+  // We'll get them again after parsing, but this gives us defaults
+  const getErrorOptions = () => {
+    const opts = getGlobalOptions();
+    return { verbose: opts.verbose, json: opts.json };
+  };
+
+  // Set up global error handlers for uncaught exceptions
+  // These catch errors that escape all try/catch blocks
+  const globalHandler = createGlobalErrorHandler(getErrorOptions());
+  process.on('uncaughtException', globalHandler);
+  process.on('unhandledRejection', globalHandler);
+
   try {
     await program.parseAsync(process.argv);
   } catch (error) {
-    const ctx = createContext(getGlobalOptions());
-    if (error instanceof Error) {
-      ctx.error(error.message);
-      if (ctx.options.verbose) {
-        console.error(error.stack);
-      }
-    } else {
-      ctx.error('An unexpected error occurred');
-    }
-    process.exit(1);
+    // Use our new error handler with current options
+    handleError(error, getErrorOptions());
   }
 }
 
