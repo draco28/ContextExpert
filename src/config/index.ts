@@ -21,3 +21,15 @@ export {
   getCtxDir,
   getConfigPath,
 } from './loader.js';
+
+// Environment variables
+export {
+  loadEnv,
+  getEnv,
+  hasApiKey,
+  getOllamaHost,
+  SETUP_INSTRUCTIONS,
+  EnvSchema,
+  _clearEnvCache,
+} from './env.js';
+export type { EnvVars } from './env.js';
