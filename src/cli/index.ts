@@ -9,6 +9,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { GlobalOptions, CommandContext } from './types.js';
 import { createConfigCommand } from './commands/config.js';
+import { createListCommand } from './commands/list.js';
 import {
   handleError,
   createGlobalErrorHandler,
@@ -110,26 +111,8 @@ program
     }
   });
 
-// List command - list indexed projects
-program
-  .command('list')
-  .alias('ls')
-  .description('List all indexed projects')
-  .action(async () => {
-    const ctx = createContext(getGlobalOptions());
-    ctx.debug('Listing projects...');
-
-    if (ctx.options.json) {
-      console.log(JSON.stringify({
-        status: 'placeholder',
-        message: 'List command not yet implemented',
-        projects: [],
-      }));
-    } else {
-      ctx.log(chalk.yellow('List command not yet implemented'));
-      ctx.log('No projects indexed yet.');
-    }
-  });
+// List command - list indexed projects (implemented)
+program.addCommand(createListCommand(() => createContext(getGlobalOptions())));
 
 // Ask command - ask a question across indexed projects
 program
