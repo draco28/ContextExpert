@@ -10,6 +10,7 @@ import chalk from 'chalk';
 import type { GlobalOptions, CommandContext } from './types.js';
 import { createConfigCommand } from './commands/config.js';
 import { createListCommand } from './commands/list.js';
+import { createStatusCommand } from './commands/status.js';
 import {
   handleError,
   createGlobalErrorHandler,
@@ -168,6 +169,9 @@ program
 
 // Config command - manage ~/.ctx/config.toml
 program.addCommand(createConfigCommand(() => createContext(getGlobalOptions())));
+
+// Status command - show storage statistics and system health
+program.addCommand(createStatusCommand(() => createContext(getGlobalOptions())));
 
 // ============================================================================
 // ERROR HANDLING & EXECUTION
