@@ -76,6 +76,7 @@ describe('createStatusCommand', () => {
       embedding: {
         provider: 'huggingface',
         model: 'BAAI/bge-large-en-v1.5',
+        batch_size: 32,
       },
       search: {
         top_k: 5,

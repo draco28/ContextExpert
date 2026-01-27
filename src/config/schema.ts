@@ -24,6 +24,13 @@ export const EmbeddingConfigSchema = z.object({
     .string()
     .optional()
     .describe('Fallback model name'),
+  batch_size: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(32)
+    .describe('Number of texts to embed per batch (1-100, default 32)'),
 });
 
 /**
