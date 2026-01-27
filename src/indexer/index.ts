@@ -53,3 +53,33 @@ export {
   getLanguageForExtension,
   getTypeForLanguage,
 } from './types.js';
+
+// Chunker module
+export {
+  // Main functions
+  chunkFile,
+  chunkFiles,
+  type ChunkerConfig,
+
+  // Types
+  type ContentType,
+  type SymbolType,
+  type ExtractedSegment,
+  type ChunkResult,
+  type ChunkOptions,
+  type ExtractionResult,
+
+  // Configuration
+  CHUNK_CONFIG,
+  MAX_FILE_SIZE,
+  MIN_CHUNK_SIZE,
+  getChunkConfig,
+  estimateTokens,
+  type ChunkConfig,
+
+  // Extractors (for advanced use)
+  extractCodeSegments,
+  extractMarkdownSegments,
+  isLanguageSupported,
+  isMarkdown,
+} from './chunker/index.js';
