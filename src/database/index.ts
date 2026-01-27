@@ -5,18 +5,18 @@
  *
  * @example
  * ```ts
- * import { getDb, runMigrations, type Project } from './database/index.js';
+ * import { getDatabase, runMigrations, type Project } from './database/index.js';
  *
  * // Run migrations on startup
  * runMigrations();
  *
- * // Use database
- * const db = getDb();
- * const projects = db.prepare('SELECT * FROM projects').all() as Project[];
+ * // Use high-level operations
+ * const db = getDatabase();
+ * const projects = db.getAllProjects();
  * ```
  */
 
-// Connection management
+// Connection management (low-level)
 export { getDb, closeDb, getDbPath, getCtxDir } from './connection.js';
 
 // Migration utilities
@@ -34,3 +34,13 @@ export type {
 
 // Utility functions
 export { generateId, embeddingToBlob, blobToEmbedding } from './schema.js';
+
+// High-level database operations
+export {
+  getDatabase,
+  resetDatabase,
+  DatabaseOperations,
+  type ProjectUpsertInput,
+  type ChunkInsertInput,
+  type ProjectStatsUpdate,
+} from './operations.js';

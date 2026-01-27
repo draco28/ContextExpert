@@ -104,3 +104,9 @@ export {
   type EmbeddingProvider,
   type EmbeddingResult,
 } from './embedder/index.js';
+
+// Pipeline orchestration
+export {
+  runIndexPipeline,
+  type IndexPipelineOptions,
+} from './pipeline.js';
