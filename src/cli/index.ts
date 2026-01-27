@@ -11,6 +11,7 @@ import type { GlobalOptions, CommandContext } from './types.js';
 import { createConfigCommand } from './commands/config.js';
 import { createIndexCommand } from './commands/index.js';
 import { createListCommand } from './commands/list.js';
+import { createRemoveCommand } from './commands/remove.js';
 import { createStatusCommand } from './commands/status.js';
 import {
   handleError,
@@ -93,6 +94,9 @@ program.addCommand(createIndexCommand(() => createContext(getGlobalOptions())));
 
 // List command - list indexed projects (implemented)
 program.addCommand(createListCommand(() => createContext(getGlobalOptions())));
+
+// Remove command - delete an indexed project and its data (implemented)
+program.addCommand(createRemoveCommand(() => createContext(getGlobalOptions())));
 
 // Ask command - ask a question across indexed projects
 program
