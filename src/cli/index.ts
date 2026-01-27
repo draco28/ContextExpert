@@ -9,6 +9,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { GlobalOptions, CommandContext } from './types.js';
 import { createConfigCommand } from './commands/config.js';
+import { createIndexCommand } from './commands/index.js';
 import { createListCommand } from './commands/list.js';
 import { createStatusCommand } from './commands/status.js';
 import {
@@ -84,33 +85,11 @@ function getGlobalOptions(): GlobalOptions {
 }
 
 // ============================================================================
-// PLACEHOLDER COMMANDS
-// These demonstrate the command structure - will be replaced with real implementations
+// IMPLEMENTED COMMANDS
 // ============================================================================
 
-// Index command - index a project for searching
-program
-  .command('index <path>')
-  .description('Index a project directory for searching')
-  .option('-n, --name <name>', 'Project name (defaults to directory name)')
-  .option('-t, --tags <tags>', 'Comma-separated tags for organization')
-  .action(async (path: string, cmdOptions: { name?: string; tags?: string }) => {
-    const ctx = createContext(getGlobalOptions());
-    ctx.debug(`Indexing path: ${path}`);
-    ctx.debug(`Options: ${JSON.stringify(cmdOptions)}`);
-
-    if (ctx.options.json) {
-      console.log(JSON.stringify({
-        status: 'placeholder',
-        message: 'Index command not yet implemented',
-        path,
-        options: cmdOptions,
-      }));
-    } else {
-      ctx.log(chalk.yellow('Index command not yet implemented'));
-      ctx.log(`Would index: ${chalk.cyan(path)}`);
-    }
-  });
+// Index command - index a project for searching (implemented)
+program.addCommand(createIndexCommand(() => createContext(getGlobalOptions())));
 
 // List command - list indexed projects (implemented)
 program.addCommand(createListCommand(() => createContext(getGlobalOptions())));
