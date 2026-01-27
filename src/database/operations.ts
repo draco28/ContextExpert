@@ -178,6 +178,41 @@ export class DatabaseOperations {
   }
 
   /**
+   * Get a project by name.
+   */
+  getProjectByName(name: string): Project | undefined {
+    return this.db.prepare('SELECT * FROM projects WHERE name = ?').get(name) as Project | undefined;
+  }
+
+  /**
+   * Delete a project and all associated data.
+   *
+   * CASCADE DELETE automatically removes:
+   * - All chunks (via FOREIGN KEY ... ON DELETE CASCADE)
+   * - All file_hashes (via FOREIGN KEY ... ON DELETE CASCADE)
+   *
+   * @returns Object with counts of deleted items
+   */
+  deleteProject(projectId: string): { chunksDeleted: number; fileHashesDeleted: number } {
+    // Get counts BEFORE deletion for reporting
+    const chunkCount = (
+      this.db.prepare('SELECT COUNT(*) as count FROM chunks WHERE project_id = ?').get(projectId) as { count: number }
+    ).count;
+
+    const fileHashCount = (
+      this.db.prepare('SELECT COUNT(*) as count FROM file_hashes WHERE project_id = ?').get(projectId) as { count: number }
+    ).count;
+
+    // Delete the project - CASCADE handles chunks and file_hashes
+    this.db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+
+    return {
+      chunksDeleted: chunkCount,
+      fileHashesDeleted: fileHashCount,
+    };
+  }
+
+  /**
    * Get a project by ID.
    */
   getProjectById(id: string): Project | undefined {
