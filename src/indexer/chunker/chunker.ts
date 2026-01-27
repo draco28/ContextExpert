@@ -7,13 +7,26 @@
  * Architecture:
  * 1. FileInfo → Read content
  * 2. Extract segments (code, docs) based on file type
- * 3. Chunk segments with appropriate strategy
+ * 3. Chunk segments with appropriate strategy:
+ *    - Code/config → RecursiveChunker (syntax-aware character splitting)
+ *    - Docs → SemanticChunker (topic-aware via embedding similarity)
  * 4. Produce ChunkResult[] with metadata
+ *
+ * Dual-Chunker Strategy:
+ * - Code has EXPLICIT structure (AST, braces, indentation)
+ * - Docs have IMPLICIT structure (topics, concepts)
+ * - Using the right chunker for each produces more coherent chunks
  */
 
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { RecursiveChunker, type Chunk, type Document } from '@contextaisdk/rag';
+import {
+  RecursiveChunker,
+  type Chunk,
+  type Document,
+  type EmbeddingProvider,
+} from '@contextaisdk/rag';
+import { SemanticChunker } from '@contextaisdk/rag/chunking';
 
 import type { FileInfo } from '../types.js';
 import type {
@@ -44,6 +57,16 @@ export interface ChunkerConfig {
    * Key is content type, value is { chunkSize, chunkOverlap }.
    */
   chunkSizeOverrides?: Partial<typeof CHUNK_CONFIG>;
+
+  /**
+   * Embedding provider for SemanticChunker.
+   *
+   * When provided, 'docs' segments use SemanticChunker (topic-aware splitting)
+   * instead of RecursiveChunker. This produces more cohesive chunks for prose.
+   *
+   * Create with: `createEmbeddingProvider(config.embedding)`
+   */
+  embeddingProvider?: EmbeddingProvider;
 }
 
 /**
@@ -118,19 +141,43 @@ export async function chunkFile(
         content: segment.content,
         metadata: {},
       }];
-    } else {
-      // Too large - use RecursiveChunker to split
-      // Note: RecursiveChunker constructor takes separators[], options go to chunk()
-      const chunker = new RecursiveChunker();
+    } else if (segment.contentType === 'docs' && config.embeddingProvider) {
+      // Docs content with embedding provider → use SemanticChunker
+      // SemanticChunker detects topic boundaries using embedding similarity,
+      // producing more coherent chunks for prose/documentation.
+      const semanticChunker = new SemanticChunker({
+        embeddingProvider: config.embeddingProvider,
+        similarityThreshold: 0.5, // Balance between too many/few splits
+        minChunkSize: 100, // Minimum tokens per chunk
+        maxChunkSize: chunkConfig.chunkSize,
+      });
 
       const document: Document = {
         id: randomUUID(),
         content: segment.content,
         metadata: {},
-        source: fileInfo.relativePath, // Required by Document interface
+        source: fileInfo.relativePath,
       };
 
-      segmentChunks = await chunker.chunk(document, {
+      segmentChunks = await semanticChunker.chunk(document, {
+        chunkSize: chunkConfig.chunkSize,
+        chunkOverlap: chunkConfig.chunkOverlap,
+        sizeUnit: 'tokens',
+      });
+    } else {
+      // Code/config content OR no embedding provider → use RecursiveChunker
+      // RecursiveChunker respects syntax boundaries (newlines, braces),
+      // which is better for structured content like code.
+      const recursiveChunker = new RecursiveChunker();
+
+      const document: Document = {
+        id: randomUUID(),
+        content: segment.content,
+        metadata: {},
+        source: fileInfo.relativePath,
+      };
+
+      segmentChunks = await recursiveChunker.chunk(document, {
         chunkSize: chunkConfig.chunkSize,
         chunkOverlap: chunkConfig.chunkOverlap,
         sizeUnit: 'tokens',

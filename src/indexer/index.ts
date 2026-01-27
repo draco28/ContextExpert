@@ -83,3 +83,24 @@ export {
   isLanguageSupported,
   isMarkdown,
 } from './chunker/index.js';
+
+// Embedder module
+export {
+  // Provider factory
+  createEmbeddingProvider,
+  getModelDimensions,
+
+  // Embedder orchestration
+  embedChunks,
+  embedChunk,
+  estimateEmbeddingMemory,
+
+  // Types
+  type EmbeddingConfig,
+  type EmbeddedChunk,
+  type EmbedderOptions,
+  type ProviderOptions,
+  type ModelLoadProgress,
+  type EmbeddingProvider,
+  type EmbeddingResult,
+} from './embedder/index.js';
