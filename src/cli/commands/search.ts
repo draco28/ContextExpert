@@ -183,6 +183,16 @@ export function createSearchCommand(
 
       ctx.debug(`Searching ${projects.length} project(s): ${projectNames.join(', ')}`);
 
+      // Warn user if multiple projects were resolved but only one will be searched
+      if (isMultiProject) {
+        ctx.log(
+          chalk.yellow(
+            `Warning: Multi-project search not yet supported. ` +
+              `Searching only "${projects[0].name}".`
+          )
+        );
+      }
+
       // ─────────────────────────────────────────────────────────────────────
       // 4. Load config and create embedding provider
       // ─────────────────────────────────────────────────────────────────────
@@ -197,8 +207,9 @@ export function createSearchCommand(
       // ─────────────────────────────────────────────────────────────────────
       // 5. Create FusionService and execute search
       // ─────────────────────────────────────────────────────────────────────
-      // Use first project for service initialization (projectIds filter handles multi-project)
-      // Pass dimensions from provider to ensure consistency with indexed data
+      // FusionService is scoped to a single project's data store.
+      // Multi-project search would require loading stores for all projects.
+      // Pass dimensions from provider to ensure consistency with indexed data.
       ctx.debug(`Using model: ${embeddingModel} (${dimensions}d)`);
 
       const fusionService = createFusionService(

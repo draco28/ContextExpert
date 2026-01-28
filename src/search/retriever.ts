@@ -117,7 +117,11 @@ export class SearchService {
     if (options.language) {
       filter.language = options.language;
     }
-    // Project filter: use exact match for single ID, $in operator for multiple
+    // Project filter: use exact match for single ID, $in operator for multiple.
+    // NOTE: This filter works within a single vector store, but FusionService
+    // currently loads only one project's store. True multi-project search would
+    // require loading stores for all target projects and merging results.
+    // See: src/cli/commands/search.ts for the multi-project warning.
     if (options.projectIds?.length) {
       filter.projectId =
         options.projectIds.length === 1
