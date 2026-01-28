@@ -125,3 +125,58 @@ export interface BM25ServiceOptions {
   /** BM25 tuning parameters */
   bm25Config?: BM25Config;
 }
+
+/**
+ * Reciprocal Rank Fusion (RRF) configuration.
+ *
+ * RRF combines results from multiple retrieval systems using rank positions
+ * rather than raw scores. This avoids score normalization issues between
+ * systems with different scoring scales (e.g., cosine similarity vs BM25).
+ *
+ * Formula: RRF(d) = Σ 1/(k + rank(d))
+ */
+export interface FusionConfig {
+  /**
+   * RRF constant (default: 60).
+   *
+   * Controls the influence of top-ranked items:
+   * - Lower k: Top ranks have more influence
+   * - Higher k: Scores more evenly distributed across ranks
+   *
+   * The value 60 is the empirically validated default from the original
+   * RRF paper (Cormack, Clarke & Büttcher, 2009).
+   */
+  k: number;
+  /**
+   * Optional weights for each retrieval source.
+   *
+   * When provided, RRF scores are multiplied by these weights:
+   * - dense: Weight for vector/semantic search results
+   * - bm25: Weight for keyword/BM25 search results
+   *
+   * Default behavior (no weights): Equal contribution from both sources.
+   */
+  weights?: {
+    /** Weight multiplier for dense vector results (default: 1.0) */
+    dense: number;
+    /** Weight multiplier for BM25 keyword results (default: 1.0) */
+    bm25: number;
+  };
+}
+
+/**
+ * Options for initializing the FusionService.
+ *
+ * The FusionService wraps both SearchService (dense) and BM25SearchService
+ * to provide hybrid search with RRF-based result fusion.
+ */
+export interface FusionServiceOptions {
+  /** Project ID to scope searches */
+  projectId: string;
+  /** RRF tuning parameters */
+  fusionConfig?: Partial<FusionConfig>;
+  /** Override default SearchService options */
+  denseOptions?: Partial<Omit<SearchServiceOptions, 'projectId'>>;
+  /** Override default BM25ServiceOptions */
+  bm25Options?: Partial<Omit<BM25ServiceOptions, 'projectId'>>;
+}
