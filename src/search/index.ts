@@ -13,8 +13,9 @@
  * // Semantic search (finds related concepts)
  * import { createSearchService } from './search/index.js';
  *
- * const search = createSearchService(projectId, config.search, {
- *   dimensions: 1024,
+ * // dimensions is REQUIRED - must match indexed embedding model
+ * const search = createSearchService(projectId, provider, config.search, {
+ *   dimensions: 1024, // Required - no default
  * });
  * const results = await search.search('authentication middleware');
  *
@@ -27,7 +28,10 @@
  * // Hybrid search (best of both worlds)
  * import { createFusionService } from './search/index.js';
  *
- * const hybrid = createFusionService(projectId, provider, config.search);
+ * // dimensions is REQUIRED in denseOptions
+ * const hybrid = createFusionService(projectId, provider, config.search, {
+ *   denseOptions: { dimensions: 1024 }, // Required - no default
+ * });
  * const results = await hybrid.search('database optimization');
  * ```
  *
@@ -83,6 +87,7 @@ export type {
   BM25ServiceOptions,
   FusionConfig,
   FusionServiceOptions,
+  DenseSearchOptions,
   FormatOptions,
   FormattedResultJSON,
 } from './types.js';

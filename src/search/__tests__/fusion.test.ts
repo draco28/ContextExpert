@@ -444,7 +444,7 @@ describe('FusionService', () => {
       const service = createFusionService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { denseOptions: { dimensions: 1024 } });
 
       const results = await service.search('PostgreSQL database');
 
@@ -481,7 +481,7 @@ describe('FusionService', () => {
       const service = createFusionService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { denseOptions: { dimensions: 1024 } });
 
       const results = await service.search('database content', { topK: 5 });
 
@@ -521,7 +521,7 @@ describe('FusionService', () => {
       const service = createFusionService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { denseOptions: { dimensions: 1024 } });
 
       // Get all results first
       const allResults = await service.search('databases');
@@ -559,6 +559,7 @@ describe('FusionService', () => {
         top_k: 10,
         rerank: false,
       }, {
+        denseOptions: { dimensions: 1024 },
         fusionConfig: { k: 10 },
       });
 
@@ -580,7 +581,7 @@ describe('FusionService', () => {
       const service = createFusionService('my-project-123', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { denseOptions: { dimensions: 1024 } });
 
       expect(service.getProjectId()).toBe('my-project-123');
     });
@@ -592,7 +593,7 @@ describe('FusionService', () => {
       const service = createFusionService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { denseOptions: { dimensions: 1024 } });
 
       expect(service.isInitialized()).toBe(false);
     });
@@ -620,11 +621,33 @@ describe('FusionService', () => {
       const service = createFusionService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { denseOptions: { dimensions: 1024 } });
 
       await service.search('test');
 
       expect(service.isInitialized()).toBe(true);
+    });
+  });
+
+  describe('dimensions validation', () => {
+    it('should throw error when dimensions not provided', () => {
+      const provider = createMockProvider();
+      expect(() =>
+        new FusionService('test', provider, { top_k: 10, rerank: false }, {
+          projectId: 'test',
+          denseOptions: { dimensions: 0 },
+        })
+      ).toThrow(/FusionService requires dimensions/);
+    });
+
+    it('should throw error for negative dimensions', () => {
+      const provider = createMockProvider();
+      expect(() =>
+        new FusionService('test', provider, { top_k: 10, rerank: false }, {
+          projectId: 'test',
+          denseOptions: { dimensions: -1 },
+        })
+      ).toThrow(/FusionService requires dimensions/);
     });
   });
 });
@@ -666,12 +689,12 @@ describe('createFusionService', () => {
     };
   }
 
-  it('should create a service with default config', () => {
+  it('should create a service with required dimensions', () => {
     const provider = createMockProvider();
     const service = createFusionService('test', provider, {
       top_k: 10,
       rerank: false,
-    });
+    }, { denseOptions: { dimensions: 1024 } });
 
     expect(service).toBeInstanceOf(FusionService);
   });
@@ -682,8 +705,19 @@ describe('createFusionService', () => {
       top_k: 10,
       rerank: false,
     }, {
+      denseOptions: { dimensions: 1024 },
       fusionConfig: { k: 30, weights: { dense: 1.5, bm25: 0.8 } },
     });
+
+    expect(service).toBeInstanceOf(FusionService);
+  });
+
+  it('should create a service with custom dimensions', () => {
+    const provider = createMockProvider(768);
+    const service = createFusionService('test', provider, {
+      top_k: 10,
+      rerank: false,
+    }, { denseOptions: { dimensions: 768 } });
 
     expect(service).toBeInstanceOf(FusionService);
   });

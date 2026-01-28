@@ -184,20 +184,21 @@ export class SearchService {
  * @param projectId - Project to search within
  * @param embeddingProvider - Provider for embedding queries
  * @param config - Search configuration from config.toml
- * @param options - Additional options (dimensions, HNSW config)
+ * @param options - Required options including dimensions (must match indexed data)
  * @returns Configured SearchService instance
+ * @throws Error if dimensions is not provided or invalid
  *
  * @example
  * ```typescript
  * import { createEmbeddingProvider } from '../indexer/embedder/provider.js';
  * import { createSearchService } from './retriever.js';
  *
- * const provider = await createEmbeddingProvider(config.embedding);
+ * const { provider, dimensions } = await createEmbeddingProvider(config.embedding);
  * const search = await createSearchService(
  *   projectId,
  *   provider,
  *   config.search,
- *   { dimensions: 1024 }
+ *   { dimensions }  // Required - must match indexed embedding model
  * );
  *
  * const results = await search.search('how does auth work?');
@@ -207,10 +208,18 @@ export function createSearchService(
   projectId: string,
   embeddingProvider: EmbeddingProvider,
   config: SearchConfig,
-  options?: Partial<Omit<SearchServiceOptions, 'projectId'>>
+  options: { dimensions: number } & Partial<Omit<SearchServiceOptions, 'projectId' | 'dimensions'>>
 ): SearchService {
-  // Default to BGE-large dimensions
-  const dimensions = options?.dimensions ?? 1024;
+  const { dimensions } = options;
+
+  // Validate dimensions - no silent fallbacks
+  if (!dimensions || dimensions <= 0) {
+    throw new Error(
+      `Invalid dimensions: ${dimensions}. ` +
+      `Dimensions must be provided and match the indexed embedding model. ` +
+      `Use createEmbeddingProvider() to get the correct dimensions.`
+    );
+  }
 
   return new SearchService(embeddingProvider, config, {
     projectId,

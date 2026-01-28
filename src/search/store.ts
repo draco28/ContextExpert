@@ -175,21 +175,35 @@ export class VectorStoreManager {
 
       if (batch.length === 0) break;
 
-      // Convert to SDK format and insert
-      const chunks = batch.map((row) => ({
-        id: row.id,
-        content: row.content,
-        // Convert BLOB → Float32Array → number[] for SDK
-        embedding: Array.from(blobToEmbedding(row.embedding)),
-        metadata: {
-          filePath: row.file_path,
-          fileType: row.file_type,
-          language: row.language,
-          startLine: row.start_line,
-          endLine: row.end_line,
-          ...(row.metadata ? JSON.parse(row.metadata) : {}),
-        },
-      }));
+      // Convert to SDK format and insert with dimension validation
+      const chunks = batch.map((row) => {
+        const embedding = blobToEmbedding(row.embedding);
+
+        // Validate embedding dimensions match expected
+        if (embedding.length !== dimensions) {
+          throw new Error(
+            `Embedding dimension mismatch for chunk ${row.id}: ` +
+            `expected ${dimensions} dimensions but found ${embedding.length}. ` +
+            `This project may have been indexed with a different embedding model. ` +
+            `Re-index with: ctx index <path> --force`
+          );
+        }
+
+        return {
+          id: row.id,
+          content: row.content,
+          // Convert Float32Array → number[] for SDK
+          embedding: Array.from(embedding),
+          metadata: {
+            filePath: row.file_path,
+            fileType: row.file_type,
+            language: row.language,
+            startLine: row.start_line,
+            endLine: row.end_line,
+            ...(row.metadata ? JSON.parse(row.metadata) : {}),
+          },
+        };
+      });
 
       await store.insert(chunks);
 

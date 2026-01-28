@@ -167,6 +167,19 @@ export interface FusionConfig {
 }
 
 /**
+ * Dense search options for FusionService.
+ * Dimensions is required to ensure embedding configuration is explicit.
+ */
+export interface DenseSearchOptions {
+  /** Embedding dimensions - REQUIRED, must match indexed data */
+  dimensions: number;
+  /** Use HNSW index for O(log n) search (default: true) */
+  useHNSW?: boolean;
+  /** HNSW index tuning parameters */
+  hnswConfig?: SearchServiceOptions['hnswConfig'];
+}
+
+/**
  * Options for initializing the FusionService.
  *
  * The FusionService wraps both SearchService (dense) and BM25SearchService
@@ -177,8 +190,8 @@ export interface FusionServiceOptions {
   projectId: string;
   /** RRF tuning parameters */
   fusionConfig?: Partial<FusionConfig>;
-  /** Override default SearchService options */
-  denseOptions?: Partial<Omit<SearchServiceOptions, 'projectId'>>;
+  /** Dense search options - dimensions is REQUIRED */
+  denseOptions: DenseSearchOptions;
   /** Override default BM25ServiceOptions */
   bm25Options?: Partial<Omit<BM25ServiceOptions, 'projectId'>>;
 }

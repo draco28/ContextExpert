@@ -31,6 +31,7 @@ import type {
   FusionServiceOptions,
   SearchConfig,
   IndexBuildProgress,
+  SearchServiceOptions,
 } from './types.js';
 
 // Re-export DEFAULT_RRF_K from SDK for convenience
@@ -148,18 +149,27 @@ export class FusionService {
     projectId: string,
     embeddingProvider: EmbeddingProvider,
     searchConfig: SearchConfig,
-    options: FusionServiceOptions = { projectId }
+    options: FusionServiceOptions
   ) {
+    // Validate dimensions - required, no silent fallbacks
+    const dimensions = options.denseOptions?.dimensions;
+    if (!dimensions || dimensions <= 0) {
+      throw new Error(
+        `FusionService requires dimensions in denseOptions. ` +
+        `Pass { denseOptions: { dimensions: <number> } } matching your indexed embedding model. ` +
+        `Use createEmbeddingProvider() to get the correct dimensions.`
+      );
+    }
+
     this.projectId = projectId;
     this.fusionConfig = {
       k: options.fusionConfig?.k ?? DEFAULT_RRF_K,
       weights: options.fusionConfig?.weights,
     };
 
-    // Create underlying services
-    // Dense service needs dimensions - default to 1024 (BGE-large)
+    // Create underlying services with validated dimensions
     this.denseService = createSearchService(projectId, embeddingProvider, searchConfig, {
-      dimensions: options.denseOptions?.dimensions ?? 1024,
+      dimensions,
       useHNSW: options.denseOptions?.useHNSW,
       hnswConfig: options.denseOptions?.hnswConfig,
     });
@@ -260,13 +270,15 @@ export class FusionService {
  * @param projectId - Project ID to scope searches
  * @param embeddingProvider - Provider for generating query embeddings (dense search)
  * @param searchConfig - Search configuration
- * @param options - Optional fusion-specific configuration
+ * @param options - Required options including denseOptions.dimensions
  * @returns Configured FusionService instance
+ * @throws Error if dimensions is not provided in denseOptions
  *
  * @example
  * ```typescript
- * const provider = await createEmbeddingProvider(config.embedding);
+ * const { provider, dimensions } = await createEmbeddingProvider(config.embedding);
  * const service = createFusionService('my-project', provider, config.search, {
+ *   denseOptions: { dimensions },  // Required - must match indexed model
  *   fusionConfig: { k: 60, weights: { dense: 1.0, bm25: 1.0 } }
  * });
  *
@@ -277,10 +289,12 @@ export function createFusionService(
   projectId: string,
   embeddingProvider: EmbeddingProvider,
   searchConfig: SearchConfig = { top_k: 10, rerank: false },
-  options?: Partial<Omit<FusionServiceOptions, 'projectId'>>
+  options: { denseOptions: { dimensions: number; useHNSW?: boolean; hnswConfig?: SearchServiceOptions['hnswConfig'] } } & Partial<Omit<FusionServiceOptions, 'projectId' | 'denseOptions'>>
 ): FusionService {
   return new FusionService(projectId, embeddingProvider, searchConfig, {
     projectId,
-    ...options,
+    denseOptions: options.denseOptions,
+    fusionConfig: options.fusionConfig,
+    bm25Options: options.bm25Options,
   });
 }

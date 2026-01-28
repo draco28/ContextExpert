@@ -157,7 +157,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       const results = await service.search('authentication');
 
@@ -190,7 +190,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       const results = await service.search('content', { topK: 5 });
 
@@ -232,7 +232,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       const results = await service.search(queryText);
 
@@ -257,7 +257,7 @@ describe('SearchService', () => {
       const service = createSearchService('empty-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       const results = await service.search('anything');
 
@@ -298,7 +298,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       // Search with projectIds filter
       const results = await service.search('authentication', {
@@ -333,7 +333,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       // Search with multiple projectIds (should use $in operator)
       const results = await service.search('database', {
@@ -368,7 +368,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       // Not initialized yet
       expect(service.isInitialized()).toBe(false);
@@ -403,7 +403,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       // Multiple searches
       await service.search('query 1');
@@ -438,7 +438,7 @@ describe('SearchService', () => {
       const service = createSearchService('test-project', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       const count = await service.getChunkCount();
       expect(count).toBe(15);
@@ -451,7 +451,7 @@ describe('SearchService', () => {
       const service = createSearchService('my-project-123', provider, {
         top_k: 10,
         rerank: false,
-      });
+      }, { dimensions: 1024 });
 
       expect(service.getProjectId()).toBe('my-project-123');
     });
@@ -459,12 +459,32 @@ describe('SearchService', () => {
 });
 
 describe('createSearchService', () => {
-  it('should create a service with default dimensions', () => {
+  it('should throw error when dimensions not provided', () => {
+    const provider = createMockProvider();
+    expect(() =>
+      createSearchService('test', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 0 })
+    ).toThrow(/Invalid dimensions/);
+  });
+
+  it('should throw error for negative dimensions', () => {
+    const provider = createMockProvider();
+    expect(() =>
+      createSearchService('test', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: -1 })
+    ).toThrow(/Invalid dimensions/);
+  });
+
+  it('should create a service with explicit dimensions', () => {
     const provider = createMockProvider();
     const service = createSearchService('test', provider, {
       top_k: 10,
       rerank: false,
-    });
+    }, { dimensions: 1024 });
 
     expect(service).toBeInstanceOf(SearchService);
   });
