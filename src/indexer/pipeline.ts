@@ -43,6 +43,12 @@ export interface IndexPipelineOptions {
   /** Embedding provider instance */
   embeddingProvider: EmbeddingProvider;
 
+  /** Embedding model name for tracking (e.g., "BAAI/bge-large-en-v1.5") */
+  embeddingModel?: string;
+
+  /** Embedding dimensions for tracking (e.g., 1024) */
+  embeddingDimensions?: number;
+
   /** Optional chunker configuration overrides */
   chunkerConfig?: ChunkerConfig;
 
@@ -252,11 +258,13 @@ export async function runIndexPipeline(
   let chunksStored = 0;
 
   try {
-    // Ensure project exists in database
+    // Ensure project exists in database with embedding config
     db.upsertProject({
       id: projectId,
       name: projectName,
       path: projectPath,
+      embeddingModel: options.embeddingModel,
+      embeddingDimensions: options.embeddingDimensions,
     });
 
     // Store chunks in batches

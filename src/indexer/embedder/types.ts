@@ -105,3 +105,20 @@ export interface ProviderOptions {
    */
   onProgress?: (progress: ModelLoadProgress) => void;
 }
+
+/**
+ * Result from createEmbeddingProvider including metadata about the provider.
+ *
+ * Why return metadata alongside the provider?
+ * - Callers need to know which model was actually used (primary vs fallback)
+ * - Dimensions are needed for database tracking and search service initialization
+ * - This avoids the caller having to re-derive this information
+ */
+export interface EmbeddingProviderResult {
+  /** The embedding provider instance (wrapped with caching) */
+  provider: import('@contextaisdk/rag').EmbeddingProvider;
+  /** The model name that was actually used (may differ from config if fallback activated) */
+  model: string;
+  /** The embedding dimensions for this model (e.g., 1024 for BGE-large) */
+  dimensions: number;
+}

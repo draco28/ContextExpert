@@ -24,6 +24,7 @@ import {
 import type {
   EmbeddingConfig,
   ProviderOptions,
+  EmbeddingProviderResult,
 } from './types.js';
 
 /**
@@ -111,29 +112,49 @@ async function isProviderAvailable(
  * This is the main entry point for the embedding system.
  * It reads your config.toml settings and creates the appropriate provider.
  *
+ * Returns both the provider and metadata about which model was used
+ * and its dimensions - this is needed for database tracking.
+ *
  * @example
  * ```typescript
  * import { loadConfig } from '../config';
  * import { createEmbeddingProvider } from './embedder';
  *
  * const config = await loadConfig();
- * const provider = await createEmbeddingProvider(config.embedding);
+ * const { provider, model, dimensions } = await createEmbeddingProvider(config.embedding);
  *
  * const result = await provider.embed("Hello, world!");
  * console.log(result.embedding.length); // 1024 for BGE-large
+ * console.log(dimensions); // 1024
  * ```
  *
  * @param config - Embedding configuration from config.toml
  * @param options - Optional callbacks for progress reporting
- * @returns An embedding provider, wrapped with caching
+ * @returns Object with provider, model name used, and dimensions
  * @throws Error if neither primary nor fallback provider is available
+ * @throws Error if fallback model has different dimensions than primary
  */
 export async function createEmbeddingProvider(
   config: EmbeddingConfig,
   options?: ProviderOptions
-): Promise<EmbeddingProvider> {
+): Promise<EmbeddingProviderResult> {
   let provider: EmbeddingProvider | null = null;
   let providerName: string = config.provider;
+  let actualModel: string = config.model;
+
+  // Validate dimension consistency upfront if fallback is configured
+  if (config.fallback_provider && config.fallback_model) {
+    const primaryDims = getModelDimensions(config.model);
+    const fallbackDims = getModelDimensions(config.fallback_model);
+
+    if (primaryDims !== fallbackDims) {
+      throw new Error(
+        `Embedding dimension mismatch: primary model '${config.model}' has ${primaryDims} dimensions, ` +
+        `but fallback model '${config.fallback_model}' has ${fallbackDims} dimensions. ` +
+        `Both models must have matching dimensions. Update your ~/.ctx/config.toml.`
+      );
+    }
+  }
 
   // Try primary provider
   try {
@@ -150,7 +171,11 @@ export async function createEmbeddingProvider(
     if (provider && (await isProviderAvailable(provider))) {
       // Wrap with caching for efficiency
       // CachedEmbeddingProvider deduplicates identical text inputs
-      return new CachedEmbeddingProvider({ provider });
+      return {
+        provider: new CachedEmbeddingProvider({ provider }),
+        model: actualModel,
+        dimensions: getModelDimensions(actualModel),
+      };
     }
   } catch (error) {
     // Primary provider failed, will try fallback
@@ -163,6 +188,7 @@ export async function createEmbeddingProvider(
   // Try fallback provider if configured
   if (config.fallback_provider && config.fallback_model) {
     providerName = config.fallback_provider;
+    actualModel = config.fallback_model;
 
     try {
       if (config.fallback_provider === 'huggingface') {
@@ -175,7 +201,11 @@ export async function createEmbeddingProvider(
         options?.onProgress?.({
           status: `Using fallback provider: ${config.fallback_provider}`,
         });
-        return new CachedEmbeddingProvider({ provider });
+        return {
+          provider: new CachedEmbeddingProvider({ provider }),
+          model: actualModel,
+          dimensions: getModelDimensions(actualModel),
+        };
       }
     } catch (error) {
       // Fallback also failed

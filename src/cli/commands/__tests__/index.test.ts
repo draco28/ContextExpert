@@ -116,9 +116,13 @@ describe('createIndexCommand', () => {
     };
     vi.mocked(progress.createProgressReporter).mockReturnValue(mockReporter as any);
 
-    // Set up mock embedding provider
+    // Set up mock embedding provider (returns new EmbeddingProviderResult structure)
     mockEmbeddingProvider = { embed: vi.fn() };
-    vi.mocked(embedder.createEmbeddingProvider).mockResolvedValue(mockEmbeddingProvider as any);
+    vi.mocked(embedder.createEmbeddingProvider).mockResolvedValue({
+      provider: mockEmbeddingProvider,
+      model: 'BAAI/bge-large-en-v1.5',
+      dimensions: 1024,
+    } as any);
 
     // Set up mock config
     vi.mocked(config.loadConfig).mockReturnValue({

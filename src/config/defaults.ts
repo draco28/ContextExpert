@@ -21,11 +21,12 @@ export const DEFAULT_CONFIG: Config = {
 
   // Embedding settings - BGE-large via Huggingface (local, no API cost)
   // with Ollama fallback if Huggingface isn't available
+  // IMPORTANT: Both primary and fallback must have matching dimensions (1024)
   embedding: {
     provider: 'huggingface',
-    model: 'BAAI/bge-large-en-v1.5',
+    model: 'BAAI/bge-large-en-v1.5',      // 1024 dimensions
     fallback_provider: 'ollama',
-    fallback_model: 'nomic-embed-text',
+    fallback_model: 'mxbai-embed-large',  // 1024 dimensions (matches primary)
     batch_size: 32, // Texts per embedding batch (balance of speed vs memory)
   },
 
@@ -49,7 +50,8 @@ default_provider = "${DEFAULT_CONFIG.default_provider}"
 
 # Embedding Settings
 # Primary: BGE-large via Huggingface (runs locally, no API cost)
-# Fallback: nomic-embed via Ollama (if Huggingface unavailable)
+# Fallback: mxbai-embed-large via Ollama (if Huggingface unavailable)
+# IMPORTANT: Both must have matching dimensions (1024) to avoid data corruption
 [embedding]
 provider = "${DEFAULT_CONFIG.embedding.provider}"
 model = "${DEFAULT_CONFIG.embedding.model}"

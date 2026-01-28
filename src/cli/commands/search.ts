@@ -189,17 +189,17 @@ export function createSearchCommand(
       const config = loadConfig();
       ctx.debug(`Embedding: ${config.embedding.model} (${config.embedding.provider})`);
 
-      const embeddingProvider = await createEmbeddingProvider(config.embedding, {
-        onProgress: (p) => ctx.debug(`Embedding init: ${p.phase} ${p.current}/${p.total}`),
-      });
+      const { provider: embeddingProvider, model: embeddingModel, dimensions } =
+        await createEmbeddingProvider(config.embedding, {
+          onProgress: (p) => ctx.debug(`Embedding init: ${p.status}`),
+        });
 
       // ─────────────────────────────────────────────────────────────────────
       // 5. Create FusionService and execute search
       // ─────────────────────────────────────────────────────────────────────
       // Use first project for service initialization (projectIds filter handles multi-project)
       // Pass dimensions from provider to ensure consistency with indexed data
-      const dimensions = embeddingProvider.dimensions;
-      ctx.debug(`Provider dimensions: ${dimensions}`);
+      ctx.debug(`Using model: ${embeddingModel} (${dimensions}d)`);
 
       const fusionService = createFusionService(
         projects[0].id,

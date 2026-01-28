@@ -127,10 +127,14 @@ describe('createSearchCommand', () => {
       },
     });
 
-    // Set up mock embedding provider
+    // Set up mock embedding provider (returns new EmbeddingProviderResult structure)
     vi.mocked(embedder.createEmbeddingProvider).mockResolvedValue({
-      embed: vi.fn(),
-      embedBatch: vi.fn(),
+      provider: {
+        embed: vi.fn(),
+        embedBatch: vi.fn(),
+        dimensions: 1024,
+      },
+      model: 'BAAI/bge-large-en-v1.5',
       dimensions: 1024,
     } as unknown as ReturnType<typeof embedder.createEmbeddingProvider>);
 

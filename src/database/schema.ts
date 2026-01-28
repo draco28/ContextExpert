@@ -35,6 +35,10 @@ export interface Project {
   chunk_count: number;
   /** JSON object with custom settings */
   config: string | null;
+  /** Embedding model name used for this project's vectors (e.g., "BAAI/bge-large-en-v1.5") */
+  embedding_model: string | null;
+  /** Embedding dimensions (default: 1024 for BGE-large) */
+  embedding_dimensions: number;
 }
 
 /**

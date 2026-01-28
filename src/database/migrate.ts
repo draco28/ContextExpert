@@ -71,6 +71,22 @@ CREATE TABLE IF NOT EXISTS _migrations (
 );
     `.trim(),
   },
+  {
+    name: '002-add-embedding-tracking.sql',
+    sql: `
+-- Migration 002: Add Embedding Tracking
+-- Tracks embedding model and dimensions per project to prevent dimension mismatch issues
+
+-- Add embedding model name (e.g., "BAAI/bge-large-en-v1.5")
+ALTER TABLE projects ADD COLUMN embedding_model TEXT;
+
+-- Add embedding dimensions with default of 1024 (BGE-large standard)
+ALTER TABLE projects ADD COLUMN embedding_dimensions INTEGER DEFAULT 1024;
+
+-- Index for quick lookups by embedding model (useful for future model-based queries)
+CREATE INDEX IF NOT EXISTS idx_projects_embedding_model ON projects(embedding_model);
+    `.trim(),
+  },
 ];
 
 /**

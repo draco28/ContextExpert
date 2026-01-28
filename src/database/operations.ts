@@ -28,6 +28,10 @@ export interface ProjectUpsertInput {
   path: string;
   tags?: string[];
   ignorePatterns?: string[];
+  /** Embedding model name (e.g., "BAAI/bge-large-en-v1.5") */
+  embeddingModel?: string;
+  /** Embedding dimensions (default: 1024) */
+  embeddingDimensions?: number;
 }
 
 /**
@@ -90,15 +94,17 @@ export class DatabaseOperations {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO projects (id, name, path, tags, ignore_patterns, indexed_at, updated_at, file_count, chunk_count, config)
-      VALUES (@id, @name, @path, @tags, @ignorePatterns, @now, @now, 0, 0, NULL)
+      INSERT INTO projects (id, name, path, tags, ignore_patterns, indexed_at, updated_at, file_count, chunk_count, config, embedding_model, embedding_dimensions)
+      VALUES (@id, @name, @path, @tags, @ignorePatterns, @now, @now, 0, 0, NULL, @embeddingModel, @embeddingDimensions)
       ON CONFLICT(id) DO UPDATE SET
         name = @name,
         path = @path,
         tags = @tags,
         ignore_patterns = @ignorePatterns,
         indexed_at = @now,
-        updated_at = @now
+        updated_at = @now,
+        embedding_model = COALESCE(@embeddingModel, embedding_model),
+        embedding_dimensions = COALESCE(@embeddingDimensions, embedding_dimensions)
     `);
 
     stmt.run({
@@ -107,6 +113,8 @@ export class DatabaseOperations {
       path: input.path,
       tags: input.tags ? JSON.stringify(input.tags) : null,
       ignorePatterns: input.ignorePatterns ? JSON.stringify(input.ignorePatterns) : null,
+      embeddingModel: input.embeddingModel ?? null,
+      embeddingDimensions: input.embeddingDimensions ?? 1024,
       now,
     });
 

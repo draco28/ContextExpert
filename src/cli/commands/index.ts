@@ -137,8 +137,10 @@ export function createIndexCommand(
       }
 
       let embeddingProvider;
+      let embeddingModel: string;
+      let embeddingDimensions: number;
       try {
-        embeddingProvider = await createEmbeddingProvider(config.embedding, {
+        const result = await createEmbeddingProvider(config.embedding, {
           onProgress: (progress) => {
             if (modelLoadingSpinner) {
               const pct = progress.progress ? ` (${progress.progress}%)` : '';
@@ -152,7 +154,10 @@ export function createIndexCommand(
             }
           },
         });
-        modelLoadingSpinner?.succeed('Embedding model ready');
+        embeddingProvider = result.provider;
+        embeddingModel = result.model;
+        embeddingDimensions = result.dimensions;
+        modelLoadingSpinner?.succeed(`Embedding model ready (${embeddingModel}, ${embeddingDimensions}d)`);
       } catch (error) {
         modelLoadingSpinner?.fail('Failed to load embedding model');
         throw new CLIError(
@@ -170,6 +175,8 @@ export function createIndexCommand(
           projectName,
           projectId: existingProject?.id,
           embeddingProvider,
+          embeddingModel,
+          embeddingDimensions,
           chunkerConfig: {
             embeddingProvider, // For SemanticChunker on docs
           },

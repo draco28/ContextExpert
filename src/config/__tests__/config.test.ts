@@ -97,7 +97,7 @@ describe('Config Defaults', () => {
     expect(DEFAULT_CONFIG.embedding.provider).toBe('huggingface');
     expect(DEFAULT_CONFIG.embedding.model).toBe('BAAI/bge-large-en-v1.5');
     expect(DEFAULT_CONFIG.embedding.fallback_provider).toBe('ollama');
-    expect(DEFAULT_CONFIG.embedding.fallback_model).toBe('nomic-embed-text');
+    expect(DEFAULT_CONFIG.embedding.fallback_model).toBe('mxbai-embed-large');
     expect(DEFAULT_CONFIG.search.top_k).toBe(10);
     expect(DEFAULT_CONFIG.search.rerank).toBe(true);
   });

@@ -9,8 +9,8 @@
  * import { createEmbeddingProvider, embedChunks } from './embedder';
  * import { chunkFiles } from './chunker';
  *
- * // 1. Create provider from config
- * const provider = await createEmbeddingProvider(config.embedding);
+ * // 1. Create provider from config (returns provider + metadata)
+ * const { provider, model, dimensions } = await createEmbeddingProvider(config.embedding);
  *
  * // 2. Get chunks from chunking pipeline
  * const chunks = await chunkFiles(files);
@@ -21,6 +21,7 @@
  * });
  *
  * // 4. Store in SQLite (embeddings are Float32Array, ready for BLOB)
+ * // Track model and dimensions in project for future validation
  * for (const chunk of embeddedChunks) {
  *   db.insertChunk(chunk);
  * }
@@ -49,4 +50,5 @@ export type {
   ModelLoadProgress,
   EmbeddingProvider,
   EmbeddingResult,
+  EmbeddingProviderResult,
 } from './types.js';
