@@ -62,6 +62,16 @@ export {
   resetBM25StoreManager,
 } from './bm25-store.js';
 
+// Result formatting
+export {
+  formatResult,
+  formatResults,
+  formatResultJSON,
+  formatResultsJSON,
+  formatScore,
+  truncateSnippet,
+} from './formatter.js';
+
 // Types
 export type {
   SearchConfig,
@@ -73,4 +83,6 @@ export type {
   BM25ServiceOptions,
   FusionConfig,
   FusionServiceOptions,
+  FormatOptions,
+  FormattedResultJSON,
 } from './types.js';
