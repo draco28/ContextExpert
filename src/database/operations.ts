@@ -74,14 +74,21 @@ export class DatabaseOperations {
 
   /**
    * Get the current database file size in bytes.
+   * Returns 0 if the database file doesn't exist yet.
+   * Throws for other errors (permissions, disk issues, etc.)
    */
   getDatabaseSize(): number {
     try {
       const dbPath = getDbPath();
       const stat = statSync(dbPath);
       return stat.size;
-    } catch {
-      return 0;
+    } catch (error) {
+      // File doesn't exist yet - that's OK for fresh installs
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return 0;
+      }
+      // Permission errors, disk issues, etc. should propagate
+      throw error;
     }
   }
 
@@ -200,29 +207,40 @@ export class DatabaseOperations {
    * - All chunks (via FOREIGN KEY ... ON DELETE CASCADE)
    * - All file_hashes (via FOREIGN KEY ... ON DELETE CASCADE)
    *
+   * Uses a transaction to ensure atomicity and verify deletion.
+   *
    * @returns Object with counts of deleted items
+   * @throws Error if project doesn't exist or deletion fails
    */
   deleteProject(projectId: string): { chunksDeleted: number; fileHashesDeleted: number } {
-    // Get counts BEFORE deletion for reporting
-    const chunkCount = (
-      this.db.prepare('SELECT COUNT(*) as count FROM chunks WHERE project_id = ?').get(projectId) as { count: number }
-    ).count;
+    // Wrap in transaction for atomicity
+    const result = this.db.transaction(() => {
+      // Get counts BEFORE deletion for reporting (CASCADE will delete them)
+      const chunkCount = (
+        this.db.prepare('SELECT COUNT(*) as count FROM chunks WHERE project_id = ?').get(projectId) as { count: number }
+      ).count;
 
-    const fileHashCount = (
-      this.db.prepare('SELECT COUNT(*) as count FROM file_hashes WHERE project_id = ?').get(projectId) as { count: number }
-    ).count;
+      const fileHashCount = (
+        this.db.prepare('SELECT COUNT(*) as count FROM file_hashes WHERE project_id = ?').get(projectId) as { count: number }
+      ).count;
 
-    // Delete the project - CASCADE handles chunks and file_hashes
-    this.db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+      // Delete the project - CASCADE handles chunks and file_hashes
+      const deleteResult = this.db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
 
-    // Invalidate search caches to prevent stale data on re-index
+      // Verify the deletion actually happened
+      if (deleteResult.changes === 0) {
+        throw new Error(`Project '${projectId}' not found or already deleted`);
+      }
+
+      return { chunksDeleted: chunkCount, fileHashesDeleted: fileHashCount };
+    })();
+
+    // Invalidate search caches AFTER successful deletion
+    // (outside transaction since these are in-memory operations)
     getVectorStoreManager().invalidate(projectId);
     getBM25StoreManager().invalidate(projectId);
 
-    return {
-      chunksDeleted: chunkCount,
-      fileHashesDeleted: fileHashCount,
-    };
+    return result;
   }
 
   /**

@@ -95,13 +95,18 @@ async function createOllamaProvider(
  *
  * - HuggingFace: Always available (downloads model if needed)
  * - Ollama: Checks if server is running and model exists
+ *
+ * Logs errors before returning false to aid debugging fallback behavior.
  */
 async function isProviderAvailable(
   provider: EmbeddingProvider
 ): Promise<boolean> {
   try {
     return await provider.isAvailable();
-  } catch {
+  } catch (error) {
+    console.warn(
+      `Provider availability check failed: ${error instanceof Error ? error.message : String(error)}`
+    );
     return false;
   }
 }
