@@ -12,6 +12,7 @@ import { createConfigCommand } from './commands/config.js';
 import { createIndexCommand } from './commands/index.js';
 import { createListCommand } from './commands/list.js';
 import { createRemoveCommand } from './commands/remove.js';
+import { createSearchCommand } from './commands/search.js';
 import { createStatusCommand } from './commands/status.js';
 import {
   handleError,
@@ -122,29 +123,8 @@ program
     }
   });
 
-// Search command - search for code patterns
-program
-  .command('search <query>')
-  .description('Search for code patterns across indexed projects')
-  .option('-p, --project <name>', 'Limit search to specific project')
-  .option('-t, --type <type>', 'Filter by file type (e.g., ts, py, md)')
-  .action(async (query: string, cmdOptions: { project?: string; type?: string }) => {
-    const ctx = createContext(getGlobalOptions());
-    ctx.debug(`Query: ${query}`);
-    ctx.debug(`Options: ${JSON.stringify(cmdOptions)}`);
-
-    if (ctx.options.json) {
-      console.log(JSON.stringify({
-        status: 'placeholder',
-        message: 'Search command not yet implemented',
-        query,
-        options: cmdOptions,
-      }));
-    } else {
-      ctx.log(chalk.yellow('Search command not yet implemented'));
-      ctx.log(`Would search for: ${chalk.cyan(query)}`);
-    }
-  });
+// Search command - hybrid search (dense + BM25 + RRF fusion)
+program.addCommand(createSearchCommand(() => createContext(getGlobalOptions())));
 
 // ============================================================================
 // REAL COMMANDS (implemented)
