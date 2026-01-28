@@ -16,6 +16,11 @@
  */
 
 import type { EmbeddingProvider } from '@contextaisdk/rag';
+import {
+  reciprocalRankFusion,
+  DEFAULT_RRF_K,
+  type RankingList,
+} from '@contextaisdk/rag';
 
 import { SearchService, createSearchService } from './retriever.js';
 import { BM25SearchService, createBM25SearchService } from './bm25-retriever.js';
@@ -28,22 +33,14 @@ import type {
   IndexBuildProgress,
 } from './types.js';
 
-/**
- * Default RRF constant (k=60).
- *
- * This value comes from the original RRF paper and has been
- * empirically validated across many retrieval benchmarks.
- * It provides a good balance between:
- * - Not over-weighting top-ranked items (too low k)
- * - Not under-weighting rank differences (too high k)
- */
-export const DEFAULT_RRF_K = 60;
+// Re-export DEFAULT_RRF_K from SDK for convenience
+export { DEFAULT_RRF_K };
 
 /**
  * Compute Reciprocal Rank Fusion scores for two ranked result lists.
  *
- * This is a pure function - it takes ranked lists and returns a fused list.
- * No side effects, easy to test, easy to reason about.
+ * Uses the ContextAI SDK's reciprocalRankFusion() internally, with a wrapper
+ * to handle our SearchResultWithContext format and custom weights.
  *
  * @param denseResults - Results from dense/vector search (already sorted by score desc)
  * @param bm25Results - Results from BM25/keyword search (already sorted by score desc)
@@ -65,57 +62,69 @@ export function computeRRF(
   const denseWeight = weights?.dense ?? 1.0;
   const bm25Weight = weights?.bm25 ?? 1.0;
 
-  // Map from document ID to { rrfScore, result }
-  // We keep the first occurrence's metadata (arbitrary but deterministic)
-  const scoreMap = new Map<
-    string,
-    { rrfScore: number; result: SearchResultWithContext }
-  >();
-
-  // Process dense results
-  // rank is 1-based: first item is rank 1, second is rank 2, etc.
-  denseResults.forEach((result, index) => {
-    const rank = index + 1; // Convert 0-based index to 1-based rank
-    const rrfScore = denseWeight / (k + rank);
-
-    const existing = scoreMap.get(result.id);
-    if (existing) {
-      // Document already seen in BM25 results - add to score
-      existing.rrfScore += rrfScore;
-    } else {
-      // First occurrence - store result with initial score
-      scoreMap.set(result.id, {
-        rrfScore,
-        result, // Keep this result's metadata
-      });
+  // Build a lookup map to preserve full SearchResultWithContext metadata
+  // (SDK's RRFResult only has chunk data, not our full context)
+  const resultLookup = new Map<string, SearchResultWithContext>();
+  for (const result of denseResults) {
+    resultLookup.set(result.id, result);
+  }
+  for (const result of bm25Results) {
+    // Only add if not already present (dense takes priority for metadata)
+    if (!resultLookup.has(result.id)) {
+      resultLookup.set(result.id, result);
     }
+  }
+
+  // Convert to SDK's RankingList format
+  const rankings: RankingList[] = [
+    {
+      name: 'dense',
+      items: denseResults.map((r, i) => ({
+        id: r.id,
+        rank: i + 1, // 1-indexed
+        score: r.score,
+        chunk: { id: r.id, content: r.content, metadata: r.metadata },
+      })),
+    },
+    {
+      name: 'bm25',
+      items: bm25Results.map((r, i) => ({
+        id: r.id,
+        rank: i + 1,
+        score: r.score,
+        chunk: { id: r.id, content: r.content, metadata: r.metadata },
+      })),
+    },
+  ];
+
+  // Call SDK's RRF implementation
+  const rrfResults = reciprocalRankFusion(rankings, k);
+
+  // Convert back to SearchResultWithContext and apply custom weights
+  const fusedResults: SearchResultWithContext[] = rrfResults.map((rrf) => {
+    const original = resultLookup.get(rrf.id)!;
+
+    // Apply custom weights by adjusting contributions
+    let adjustedScore = rrf.score;
+    if (denseWeight !== 1.0 || bm25Weight !== 1.0) {
+      // Recalculate score with weights applied to each contribution
+      adjustedScore = 0;
+      for (const contrib of rrf.contributions) {
+        const weight = contrib.name === 'dense' ? denseWeight : bm25Weight;
+        adjustedScore += contrib.contribution * weight;
+      }
+    }
+
+    return {
+      ...original,
+      score: adjustedScore,
+    };
   });
 
-  // Process BM25 results
-  bm25Results.forEach((result, index) => {
-    const rank = index + 1;
-    const rrfScore = bm25Weight / (k + rank);
-
-    const existing = scoreMap.get(result.id);
-    if (existing) {
-      // Document already seen in dense results - add to score
-      existing.rrfScore += rrfScore;
-    } else {
-      // First occurrence - store result with initial score
-      scoreMap.set(result.id, {
-        rrfScore,
-        result, // Keep this result's metadata
-      });
-    }
-  });
-
-  // Convert map to array and sort by RRF score descending
-  const fusedResults = Array.from(scoreMap.values())
-    .map(({ rrfScore, result }) => ({
-      ...result,
-      score: rrfScore, // Replace original score with RRF score
-    }))
-    .sort((a, b) => b.score - a.score);
+  // Re-sort if weights changed the order
+  if (denseWeight !== 1.0 || bm25Weight !== 1.0) {
+    fusedResults.sort((a, b) => b.score - a.score);
+  }
 
   return fusedResults;
 }
