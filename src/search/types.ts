@@ -90,3 +90,38 @@ export interface IndexBuildProgress {
   /** Total chunks to load */
   total: number;
 }
+
+/**
+ * BM25 algorithm configuration.
+ *
+ * BM25 (Best Match 25) is a ranking function used for keyword-based retrieval.
+ * It extends TF-IDF with document length normalization.
+ */
+export interface BM25Config {
+  /**
+   * Term frequency saturation parameter (default: 1.2).
+   *
+   * Controls how quickly term frequency effects saturate:
+   * - Lower k1 (e.g., 0.5): Diminishing returns kick in earlier
+   * - Higher k1 (e.g., 2.0): More weight to repeated terms
+   */
+  k1?: number;
+  /**
+   * Document length normalization parameter (default: 0.75).
+   *
+   * Controls how much document length affects scoring:
+   * - b=0: No length normalization (longer docs not penalized)
+   * - b=1: Full length normalization (longer docs penalized more)
+   */
+  b?: number;
+}
+
+/**
+ * Options for initializing the BM25SearchService.
+ */
+export interface BM25ServiceOptions {
+  /** Project ID to scope searches */
+  projectId: string;
+  /** BM25 tuning parameters */
+  bm25Config?: BM25Config;
+}
