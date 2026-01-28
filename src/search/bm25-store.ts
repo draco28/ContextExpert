@@ -17,6 +17,7 @@ import type { Chunk, BM25Document } from '@contextaisdk/rag';
 import type Database from 'better-sqlite3';
 
 import { getDb } from '../database/connection.js';
+import { safeJsonParse } from '../utils/index.js';
 import type { BM25Config, IndexBuildProgress } from './types.js';
 
 /** Batch size for loading chunks from SQLite (memory efficiency) */
@@ -201,7 +202,9 @@ export class BM25StoreManager {
             language: row.language,
             startLine: row.start_line,
             endLine: row.end_line,
-            ...(row.metadata ? JSON.parse(row.metadata) : {}),
+            ...safeJsonParse(row.metadata, {}, (err) => {
+              console.warn(`[BM25Store] Skipping corrupted metadata for chunk ${row.id}: ${err.message}`);
+            }),
           },
         };
 

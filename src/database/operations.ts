@@ -18,6 +18,7 @@ import { embeddingToBlob, generateId } from './schema.js';
 import type { Project } from './schema.js';
 import type { FileType, Language } from '../indexer/types.js';
 import type { ContentType } from '../indexer/chunker/types.js';
+import { getVectorStoreManager, getBM25StoreManager } from '../search/index.js';
 
 /**
  * Input for creating/updating a project.
@@ -213,6 +214,10 @@ export class DatabaseOperations {
 
     // Delete the project - CASCADE handles chunks and file_hashes
     this.db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
+
+    // Invalidate search caches to prevent stale data on re-index
+    getVectorStoreManager().invalidate(projectId);
+    getBM25StoreManager().invalidate(projectId);
 
     return {
       chunksDeleted: chunkCount,
