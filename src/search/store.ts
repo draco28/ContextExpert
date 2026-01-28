@@ -12,6 +12,7 @@ import type Database from 'better-sqlite3';
 
 import { getDb } from '../database/connection.js';
 import { blobToEmbedding } from '../database/schema.js';
+import { safeJsonParse } from '../utils/index.js';
 import type { SearchServiceOptions, IndexBuildProgress } from './types.js';
 
 /** Batch size for loading chunks from SQLite (memory efficiency) */
@@ -200,7 +201,9 @@ export class VectorStoreManager {
             language: row.language,
             startLine: row.start_line,
             endLine: row.end_line,
-            ...(row.metadata ? JSON.parse(row.metadata) : {}),
+            ...safeJsonParse(row.metadata, {}, (err) => {
+              console.warn(`[VectorStore] Skipping corrupted metadata for chunk ${row.id}: ${err.message}`);
+            }),
           },
         };
       });
