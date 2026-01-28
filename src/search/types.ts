@@ -182,3 +182,45 @@ export interface FusionServiceOptions {
   /** Override default BM25ServiceOptions */
   bm25Options?: Partial<Omit<BM25ServiceOptions, 'projectId'>>;
 }
+
+// ============================================================================
+// Result Formatting Types
+// ============================================================================
+
+/**
+ * Options for formatting search results.
+ */
+export interface FormatOptions {
+  /** Maximum snippet length in characters (default: 200) */
+  snippetLength?: number;
+  /** Show project name prefix for cross-project searches (default: false) */
+  showProject?: boolean;
+  /** Show relevance score (default: true) */
+  showScore?: boolean;
+  /** Show line numbers in file:start-end format (default: true) */
+  showLineNumbers?: boolean;
+}
+
+/**
+ * JSON-serializable search result for programmatic consumption.
+ *
+ * Used when outputting results in JSON format (e.g., `--json` CLI flag).
+ */
+export interface FormattedResultJSON {
+  /** Similarity score (0-1, higher = more relevant) */
+  score: number;
+  /** Relative file path from project root */
+  filePath: string;
+  /** Start line number in source file */
+  lineStart: number;
+  /** End line number in source file */
+  lineEnd: number;
+  /** Matched chunk text content */
+  content: string;
+  /** Programming language (null for non-code) */
+  language: string | null;
+  /** Content type classification */
+  fileType: 'code' | 'docs' | 'config' | 'unknown';
+  /** Project ID (included when showProject option is true) */
+  projectId?: string;
+}
