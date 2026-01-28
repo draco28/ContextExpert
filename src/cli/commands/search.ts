@@ -2,12 +2,15 @@
  * Search Command
  *
  * Hybrid search across indexed projects using dense vectors + BM25 + RRF fusion.
+ * Optionally uses BGE cross-encoder reranking for improved precision.
  *
  *   ctx search "authentication middleware"
  *   ctx search "login" --project my-app --top 10 --json
+ *   ctx search "auth flow" --rerank      # Enable reranking for better precision
  *
  * Uses the existing search infrastructure:
  * - FusionService for hybrid search (RRF fusion of dense + BM25)
+ * - RerankerService for optional BGE cross-encoder reranking
  * - formatResults/formatResultsJSON for output formatting
  */
 
@@ -39,6 +42,8 @@ interface SearchCommandOptions {
   project?: string;
   /** Number of results to return (default: 10, max: 100) */
   top: string;
+  /** Enable BGE cross-encoder reranking (overrides config) */
+  rerank?: boolean;
 }
 
 // ============================================================================
@@ -174,6 +179,7 @@ export function createSearchCommand(
     .description('Search for code patterns across indexed projects')
     .option('-p, --project <name>', 'Limit search to specific project')
     .option('-k, --top <number>', 'Number of results to return', String(DEFAULT_TOP_K))
+    .option('-r, --rerank', 'Enable BGE cross-encoder reranking for improved precision')
     .action(async (query: string, cmdOptions: SearchCommandOptions) => {
       const ctx = getContext();
 
@@ -236,19 +242,27 @@ export function createSearchCommand(
       // Pass dimensions from provider to ensure consistency with indexed data.
       ctx.debug(`Using model: ${embeddingModel} (${dimensions}d)`);
 
+      // CLI --rerank flag overrides config.search.rerank
+      // If --rerank is specified, enable reranking; otherwise use config default
+      const shouldRerank = cmdOptions.rerank ?? config.search.rerank;
+      ctx.debug(`Reranking: ${shouldRerank ? 'enabled' : 'disabled'}`);
+
       const fusionService = createFusionService(
         projects[0].id,
         embeddingProvider,
-        config.search,
+        { ...config.search, rerank: shouldRerank },
         { denseOptions: { dimensions } }
       );
 
       ctx.debug('Initializing search index...');
+      if (shouldRerank) {
+        ctx.debug('Warming up BGE reranker model (runs in parallel with index loading)...');
+      }
       await fusionService.ensureInitialized((progress) => {
         ctx.debug(`Index: ${progress.phase} ${progress.loaded}/${progress.total}`);
       });
 
-      ctx.debug('Executing hybrid search...');
+      ctx.debug(`Executing hybrid search${shouldRerank ? ' with reranking' : ''}...`);
       // Note: FusionService is already scoped to the first project's data.
       // Multi-project search would require loading all project stores.
       // For now, we search the first project (single-project mode effective).

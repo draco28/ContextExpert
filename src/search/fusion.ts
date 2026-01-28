@@ -24,6 +24,7 @@ import {
 
 import { SearchService, createSearchService } from './retriever.js';
 import { BM25SearchService, createBM25SearchService } from './bm25-retriever.js';
+import { RerankerService } from './reranker.js';
 import type {
   SearchResultWithContext,
   SearchQueryOptions,
@@ -32,6 +33,7 @@ import type {
   SearchConfig,
   IndexBuildProgress,
   SearchServiceOptions,
+  RerankConfig,
 } from './types.js';
 
 // Re-export DEFAULT_RRF_K from SDK for convenience
@@ -136,6 +138,11 @@ export function computeRRF(
  * Wraps SearchService (dense) and BM25SearchService (sparse) to provide
  * a unified search interface with RRF-based result fusion.
  *
+ * Optionally applies BGE cross-encoder reranking after fusion for
+ * improved precision (enabled via searchConfig.rerank).
+ *
+ * Pipeline: Query → Dense + BM25 → RRF Fusion → [Optional Rerank] → Results
+ *
  * Both underlying services are lazily initialized on first search.
  */
 export class FusionService {
@@ -143,13 +150,16 @@ export class FusionService {
   private readonly fusionConfig: FusionConfig;
   private readonly denseService: SearchService;
   private readonly bm25Service: BM25SearchService;
+  private readonly rerankerService: RerankerService | null = null;
+  private readonly shouldRerank: boolean;
   private initialized = false;
 
   constructor(
     projectId: string,
     embeddingProvider: EmbeddingProvider,
     searchConfig: SearchConfig,
-    options: FusionServiceOptions
+    options: FusionServiceOptions,
+    rerankConfig?: RerankConfig
   ) {
     // Validate dimensions - required, no silent fallbacks
     const dimensions = options.denseOptions?.dimensions;
@@ -167,6 +177,12 @@ export class FusionService {
       weights: options.fusionConfig?.weights,
     };
 
+    // Configure reranking - only create service if enabled
+    this.shouldRerank = searchConfig.rerank;
+    if (this.shouldRerank) {
+      this.rerankerService = new RerankerService(rerankConfig);
+    }
+
     // Create underlying services with validated dimensions
     this.denseService = createSearchService(projectId, embeddingProvider, searchConfig, {
       dimensions,
@@ -182,15 +198,18 @@ export class FusionService {
   /**
    * Perform hybrid search combining dense and BM25 results via RRF.
    *
+   * If reranking is enabled, fused results are passed through the BGE
+   * cross-encoder reranker for improved precision before applying filters.
+   *
    * @param query - Search query text
    * @param options - Search options (topK, minScore, fileType, language)
-   * @returns Fused results sorted by RRF score descending
+   * @returns Fused (and optionally reranked) results sorted by score descending
    */
   async search(
     query: string,
     options?: SearchQueryOptions
   ): Promise<SearchResultWithContext[]> {
-    // Ensure both services are initialized
+    // Ensure all services are initialized (including reranker warmup)
     await this.ensureInitialized();
 
     // Run both searches in parallel for performance
@@ -202,12 +221,20 @@ export class FusionService {
     // Fuse results using RRF
     let fusedResults = computeRRF(denseResults, bm25Results, this.fusionConfig);
 
-    // Apply post-fusion filters
+    // Apply reranking if enabled
+    // Reranker takes top N candidates (default 50) and returns top K after reranking
+    if (this.shouldRerank && this.rerankerService) {
+      const topK = options?.topK ?? 10;
+      fusedResults = await this.rerankerService.rerank(query, fusedResults, topK);
+    }
+
+    // Apply post-fusion/post-rerank filters
     if (options?.minScore !== undefined) {
       fusedResults = fusedResults.filter((r) => r.score >= options.minScore!);
     }
 
-    if (options?.topK !== undefined) {
+    // Apply topK limit (reranker already limits if enabled, but this handles non-reranked case)
+    if (options?.topK !== undefined && !this.shouldRerank) {
       fusedResults = fusedResults.slice(0, options.topK);
     }
 
@@ -215,10 +242,13 @@ export class FusionService {
   }
 
   /**
-   * Initialize both underlying search services.
+   * Initialize all underlying services.
    *
    * Called automatically on first search, but can be called explicitly
    * to control when the loading happens (e.g., with progress reporting).
+   *
+   * If reranking is enabled, the BGE model is warmed up in parallel with
+   * the dense and BM25 index loading, hiding the model load latency.
    *
    * @param onProgress - Optional callback for progress updates
    */
@@ -227,12 +257,19 @@ export class FusionService {
   ): Promise<void> {
     if (this.initialized) return;
 
-    // Initialize both services in parallel
-    await Promise.all([
+    // Build list of initialization promises
+    const initPromises: Promise<void>[] = [
       this.denseService.ensureInitialized(onProgress),
       this.bm25Service.ensureInitialized(onProgress),
-    ]);
+    ];
 
+    // Warmup reranker in parallel if enabled
+    // This hides the ~2-3 second model load time behind index loading
+    if (this.rerankerService) {
+      initPromises.push(this.rerankerService.warmup());
+    }
+
+    await Promise.all(initPromises);
     this.initialized = true;
   }
 
@@ -269,7 +306,7 @@ export class FusionService {
  *
  * @param projectId - Project ID to scope searches
  * @param embeddingProvider - Provider for generating query embeddings (dense search)
- * @param searchConfig - Search configuration
+ * @param searchConfig - Search configuration (includes rerank flag)
  * @param options - Required options including denseOptions.dimensions
  * @returns Configured FusionService instance
  * @throws Error if dimensions is not provided in denseOptions
@@ -277,10 +314,18 @@ export class FusionService {
  * @example
  * ```typescript
  * const { provider, dimensions } = await createEmbeddingProvider(config.embedding);
+ *
+ * // Without reranking
  * const service = createFusionService('my-project', provider, config.search, {
- *   denseOptions: { dimensions },  // Required - must match indexed model
- *   fusionConfig: { k: 60, weights: { dense: 1.0, bm25: 1.0 } }
+ *   denseOptions: { dimensions },
  * });
+ *
+ * // With reranking enabled (searchConfig.rerank = true)
+ * const serviceWithRerank = createFusionService('my-project', provider,
+ *   { ...config.search, rerank: true },
+ *   { denseOptions: { dimensions } },
+ *   { model: 'Xenova/bge-reranker-base', candidateCount: 50 }  // Optional rerank config
+ * );
  *
  * const results = await service.search('authentication flow');
  * ```
@@ -289,12 +334,19 @@ export function createFusionService(
   projectId: string,
   embeddingProvider: EmbeddingProvider,
   searchConfig: SearchConfig = { top_k: 10, rerank: false },
-  options: { denseOptions: { dimensions: number; useHNSW?: boolean; hnswConfig?: SearchServiceOptions['hnswConfig'] } } & Partial<Omit<FusionServiceOptions, 'projectId' | 'denseOptions'>>
+  options: { denseOptions: { dimensions: number; useHNSW?: boolean; hnswConfig?: SearchServiceOptions['hnswConfig'] } } & Partial<Omit<FusionServiceOptions, 'projectId' | 'denseOptions'>>,
+  rerankConfig?: RerankConfig
 ): FusionService {
-  return new FusionService(projectId, embeddingProvider, searchConfig, {
+  return new FusionService(
     projectId,
-    denseOptions: options.denseOptions,
-    fusionConfig: options.fusionConfig,
-    bm25Options: options.bm25Options,
-  });
+    embeddingProvider,
+    searchConfig,
+    {
+      projectId,
+      denseOptions: options.denseOptions,
+      fusionConfig: options.fusionConfig,
+      bm25Options: options.bm25Options,
+    },
+    rerankConfig
+  );
 }

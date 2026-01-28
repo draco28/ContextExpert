@@ -196,6 +196,44 @@ export interface FusionServiceOptions {
   bm25Options?: Partial<Omit<BM25ServiceOptions, 'projectId'>>;
 }
 
+/**
+ * Configuration for BGE cross-encoder reranking.
+ *
+ * Reranking improves search precision by scoring query-document pairs
+ * with a cross-encoder model after initial retrieval. Cross-encoders
+ * process query and document together, capturing fine-grained interactions
+ * that bi-encoder embeddings miss.
+ *
+ * Pipeline: Query → Hybrid Search (top N) → BGE Rerank → Final Results (top K)
+ */
+export interface RerankConfig {
+  /**
+   * Reranker model identifier (default: 'Xenova/bge-reranker-base').
+   *
+   * Available models:
+   * - 'Xenova/bge-reranker-base' (~110MB, good balance of speed/quality)
+   * - 'Xenova/bge-reranker-large' (~330MB, best quality, slower)
+   */
+  model?: string;
+  /**
+   * Number of candidates to rerank (default: 50).
+   *
+   * After hybrid search, this many top results are passed to the reranker.
+   * Research suggests ~50 candidates provides good precision/recall:
+   * - Too few (10-20): May miss relevant documents ranked lower initially
+   * - Too many (100+): Diminishing returns, increased latency
+   */
+  candidateCount?: number;
+  /**
+   * Device for model inference (default: 'auto').
+   *
+   * - 'cpu': Force CPU inference (slower but universal)
+   * - 'gpu': Attempt GPU acceleration (may not be available)
+   * - 'auto': Automatically detect best option
+   */
+  device?: 'cpu' | 'gpu' | 'auto';
+}
+
 // ============================================================================
 // Result Formatting Types
 // ============================================================================

@@ -52,6 +52,9 @@ export {
   DEFAULT_RRF_K,
 } from './fusion.js';
 
+// Reranking service
+export { RerankerService } from './reranker.js';
+
 // Store management - Vector
 export {
   VectorStoreManager,
@@ -88,6 +91,7 @@ export type {
   FusionConfig,
   FusionServiceOptions,
   DenseSearchOptions,
+  RerankConfig,
   FormatOptions,
   FormattedResultJSON,
 } from './types.js';
