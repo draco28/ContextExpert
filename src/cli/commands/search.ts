@@ -13,6 +13,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { existsSync } from 'node:fs';
 import type { CommandContext } from '../types.js';
 import { getDb, runMigrations } from '../../database/index.js';
 import { loadConfig } from '../../config/loader.js';
@@ -75,6 +76,9 @@ function resolveProjects(projectName?: string): Project[] {
       );
     }
 
+    // Warn if project path no longer exists
+    warnIfPathStale(project);
+
     return [project];
   }
 
@@ -90,7 +94,27 @@ function resolveProjects(projectName?: string): Project[] {
     );
   }
 
+  // Warn about any projects with stale paths
+  for (const project of projects) {
+    warnIfPathStale(project);
+  }
+
   return projects;
+}
+
+/**
+ * Warn if a project's stored path no longer exists on disk.
+ * This helps users notice when projects have been moved or deleted.
+ */
+function warnIfPathStale(project: Project): void {
+  if (!existsSync(project.path)) {
+    console.warn(
+      chalk.yellow(`Warning: Project '${project.name}' path no longer exists: ${project.path}`)
+    );
+    console.warn(
+      chalk.yellow(`  Consider re-indexing at the new location or running: ctx remove ${project.name}`)
+    );
+  }
 }
 
 /**

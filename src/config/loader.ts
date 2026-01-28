@@ -10,27 +10,14 @@
  */
 
 import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import TOML from '@iarna/toml';
 import { ConfigSchema, PartialConfigSchema, type Config, type PartialConfig } from './schema.js';
 import { DEFAULT_CONFIG, CONFIG_TEMPLATE } from './defaults.js';
 import { ConfigError } from '../errors/index.js';
+import { getCtxDir, getConfigPath } from './paths.js';
 
-/**
- * Get the ctx directory path (~/.ctx)
- * This is the same function used by the database module
- */
-export function getCtxDir(): string {
-  return path.join(os.homedir(), '.ctx');
-}
-
-/**
- * Get the config file path (~/.ctx/config.toml)
- */
-export function getConfigPath(): string {
-  return path.join(getCtxDir(), 'config.toml');
-}
+// Re-export path functions for backwards compatibility
+export { getCtxDir, getConfigPath };
 
 /**
  * Ensure the ~/.ctx directory exists
@@ -77,6 +64,43 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
 }
 
 /**
+ * Known config keys at each level of nesting.
+ * Used to detect and warn about unknown/misspelled keys.
+ */
+const KNOWN_CONFIG_KEYS: Record<string, string[]> = {
+  root: ['default_model', 'default_provider', 'embedding', 'search'],
+  embedding: ['provider', 'model', 'fallback_provider', 'fallback_model', 'batch_size'],
+  search: ['top_k', 'rerank'],
+};
+
+/**
+ * Warn about unknown config fields that will be ignored.
+ * Helps users catch typos like "embeding" instead of "embedding".
+ */
+function warnUnknownFields(
+  parsed: Record<string, unknown>,
+  level: string = 'root',
+  prefix: string = ''
+): void {
+  const knownKeys = KNOWN_CONFIG_KEYS[level] ?? [];
+
+  for (const key of Object.keys(parsed)) {
+    const fullKey = prefix ? `${prefix}.${key}` : key;
+
+    if (!knownKeys.includes(key)) {
+      console.warn(`Warning: Unknown config field '${fullKey}' will be ignored`);
+    } else if (
+      typeof parsed[key] === 'object' &&
+      parsed[key] !== null &&
+      !Array.isArray(parsed[key])
+    ) {
+      // Recurse into nested objects (embedding, search)
+      warnUnknownFields(parsed[key] as Record<string, unknown>, key, fullKey);
+    }
+  }
+}
+
+/**
  * Load and parse the config file
  * Returns the merged config (defaults + user overrides)
  *
@@ -107,6 +131,11 @@ export function loadConfig(createIfMissing = true): Config {
       `Invalid TOML in config file: ${message}`,
       `Fix the syntax in ${configPath} or run: ctx config reset --force`
     );
+  }
+
+  // Warn about unknown fields (helps catch typos)
+  if (typeof parsed === 'object' && parsed !== null) {
+    warnUnknownFields(parsed as Record<string, unknown>);
   }
 
   // Validate against the partial schema (allows missing fields)

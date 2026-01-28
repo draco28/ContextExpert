@@ -36,6 +36,8 @@ vi.mock('../connection.js', () => ({
       get: vi.fn(() => ({ count: 5 })),
       run: vi.fn(() => ({ changes: 1 })),
     })),
+    // Mock transaction() to execute the callback immediately and return its result
+    transaction: vi.fn((fn) => () => fn()),
   })),
   getDbPath: vi.fn(() => '/mock/path'),
 }));

@@ -7,12 +7,7 @@
 
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-
-// Database configuration
-const CTX_DIR = join(homedir(), '.ctx');
-const DB_PATH = join(CTX_DIR, 'context.db');
+import { CTX_DIR, DB_PATH, getCtxDir, getDbPath } from '../config/paths.js';
 
 // Module-level singleton instance
 let db: Database.Database | null = null;
@@ -75,18 +70,5 @@ export function closeDb(): void {
   }
 }
 
-/**
- * Get the database file path.
- * Useful for testing or diagnostics.
- */
-export function getDbPath(): string {
-  return DB_PATH;
-}
-
-/**
- * Get the context directory path (~/.ctx).
- * Useful for storing other config files.
- */
-export function getCtxDir(): string {
-  return CTX_DIR;
-}
+// Re-export path functions from centralized paths module
+export { getCtxDir, getDbPath };

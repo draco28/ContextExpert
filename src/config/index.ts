@@ -22,6 +22,9 @@ export {
   getConfigPath,
 } from './loader.js';
 
+// Path constants (for direct access without function call)
+export { CTX_DIR, DB_PATH, CONFIG_PATH } from './paths.js';
+
 // Environment variables
 export {
   loadEnv,
