@@ -284,6 +284,142 @@ describe('BM25SearchService', () => {
       expect(results[0]!.language).toBe('python');
     });
 
+    it('should filter by single projectId', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'Database authentication handler',
+          file_path: 'src/auth.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 50,
+          metadata: JSON.stringify({ projectId: 'project-alpha' }),
+        },
+        {
+          id: 'chunk-2',
+          content: 'Database connection handler',
+          file_path: 'src/db.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 50,
+          metadata: JSON.stringify({ projectId: 'project-beta' }),
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Filter to only project-alpha
+      const results = await service.search('database', {
+        projectIds: ['project-alpha'],
+      });
+
+      expect(results.length).toBe(1);
+      expect(results[0]!.metadata.projectId).toBe('project-alpha');
+    });
+
+    it('should filter by multiple projectIds (OR logic)', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'Database handler for alpha',
+          file_path: 'src/alpha.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 50,
+          metadata: JSON.stringify({ projectId: 'project-alpha' }),
+        },
+        {
+          id: 'chunk-2',
+          content: 'Database handler for beta',
+          file_path: 'src/beta.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 50,
+          metadata: JSON.stringify({ projectId: 'project-beta' }),
+        },
+        {
+          id: 'chunk-3',
+          content: 'Database handler for gamma',
+          file_path: 'src/gamma.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 50,
+          metadata: JSON.stringify({ projectId: 'project-gamma' }),
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Filter to alpha OR beta (should exclude gamma)
+      const results = await service.search('database handler', {
+        projectIds: ['project-alpha', 'project-beta'],
+      });
+
+      expect(results.length).toBe(2);
+      const projectIds = results.map((r) => r.metadata.projectId);
+      expect(projectIds).toContain('project-alpha');
+      expect(projectIds).toContain('project-beta');
+      expect(projectIds).not.toContain('project-gamma');
+    });
+
+    it('should exclude chunks without projectId when filter is applied', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'Database handler with project',
+          file_path: 'src/with-project.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 50,
+          metadata: JSON.stringify({ projectId: 'project-alpha' }),
+        },
+        {
+          id: 'chunk-2',
+          content: 'Database handler without project',
+          file_path: 'src/no-project.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 50,
+          metadata: null, // No projectId
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Filter should exclude chunk without projectId
+      const results = await service.search('database handler', {
+        projectIds: ['project-alpha'],
+      });
+
+      expect(results.length).toBe(1);
+      expect(results[0]!.id).toBe('chunk-1');
+    });
+
     it('should filter by minScore', async () => {
       const testChunks: ChunkRow[] = [
         {

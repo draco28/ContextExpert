@@ -117,6 +117,13 @@ export class SearchService {
     if (options.language) {
       filter.language = options.language;
     }
+    // Project filter: use exact match for single ID, $in operator for multiple
+    if (options.projectIds?.length) {
+      filter.projectId =
+        options.projectIds.length === 1
+          ? options.projectIds[0]
+          : { $in: options.projectIds };
+    }
 
     // Perform retrieval (DenseRetriever embeds query automatically)
     const results = await this.retriever!.retrieve(query, {

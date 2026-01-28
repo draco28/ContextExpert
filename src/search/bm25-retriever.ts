@@ -118,6 +118,13 @@ export class BM25SearchService {
       if (options.language && language !== options.language) {
         continue;
       }
+      // Project filter: chunk must have projectId matching one in the filter array
+      if (options.projectIds?.length) {
+        const chunkProjectId = result.chunk.metadata?.projectId as string | undefined;
+        if (!chunkProjectId || !options.projectIds.includes(chunkProjectId)) {
+          continue;
+        }
+      }
       if (options.minScore !== undefined && result.score < options.minScore) {
         continue;
       }

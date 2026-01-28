@@ -48,6 +48,8 @@ export interface SearchQueryOptions {
   fileType?: 'code' | 'docs' | 'config';
   /** Filter by programming language */
   language?: string;
+  /** Filter by project ID(s) - results must match ANY of the provided IDs (OR logic) */
+  projectIds?: string[];
 }
 
 /**
