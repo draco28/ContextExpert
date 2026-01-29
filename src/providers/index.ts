@@ -37,12 +37,17 @@ export {
 // LLM PROVIDERS
 // ============================================================================
 
-// Main factory - creates provider based on config
+// Main factory - creates provider based on config (with automatic fallback)
 export {
   createLLMProvider,
+  AllProvidersFailedError,
   type LLMProviderResult,
+  type LLMProviderResultWithFallback,
   type LLMProviderOptions,
+  type FallbackOptions,
   type ProviderType,
+  type ProviderAttempt,
+  type CapabilityWarning,
 } from './llm.js';
 
 // Individual provider factories - for direct use when needed
