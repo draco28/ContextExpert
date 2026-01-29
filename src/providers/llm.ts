@@ -25,9 +25,18 @@ import type { Config } from '../config/schema.js';
 import {
   createAnthropicProvider,
   type AnthropicProviderOptions,
+  DEFAULT_ANTHROPIC_MODEL,
 } from './anthropic.js';
-import { createOpenAIProvider, type OpenAIProviderOptions } from './openai.js';
-import { createOllamaProvider, type OllamaProviderOptions } from './ollama.js';
+import {
+  createOpenAIProvider,
+  type OpenAIProviderOptions,
+  DEFAULT_OPENAI_MODEL,
+} from './openai.js';
+import {
+  createOllamaProvider,
+  type OllamaProviderOptions,
+  DEFAULT_OLLAMA_MODEL,
+} from './ollama.js';
 
 // ============================================================================
 // TYPES
@@ -47,6 +56,82 @@ export interface LLMProviderResult {
   name: ProviderType;
   /** Model being used (e.g., 'claude-sonnet-4-20250514', 'gpt-4o', 'llama3.2') */
   model: string;
+}
+
+/**
+ * Record of a failed provider creation attempt.
+ * Used for diagnostics when multiple providers fail.
+ */
+export interface ProviderAttempt {
+  /** Which provider was attempted */
+  provider: ProviderType;
+  /** The error that caused the failure */
+  error: Error;
+  /** When the attempt was made */
+  timestamp: Date;
+}
+
+/**
+ * Extended result that includes fallback metadata.
+ * Returned by createLLMProvider when fallback is enabled.
+ */
+export interface LLMProviderResultWithFallback extends LLMProviderResult {
+  /** True if a fallback provider was used instead of the primary */
+  usedFallback: boolean;
+  /** The provider that was originally requested (from config) */
+  requestedProvider: ProviderType;
+  /** All failed attempts before success (empty if primary succeeded) */
+  failedAttempts: ProviderAttempt[];
+}
+
+/**
+ * Warning about lost capabilities when falling back to a different provider.
+ */
+export interface CapabilityWarning {
+  /** Provider we're falling back from */
+  fromProvider: ProviderType;
+  /** Provider we're falling back to */
+  toProvider: ProviderType;
+  /** Capabilities available in fromProvider but not in toProvider */
+  lostCapabilities: string[];
+}
+
+/**
+ * Callbacks for monitoring fallback behavior.
+ */
+export interface FallbackOptions {
+  /** Called when falling back from one provider to another */
+  onFallback?: (from: ProviderType, to: ProviderType, reason: string) => void;
+  /** Called when a provider attempt fails */
+  onProviderFailed?: (provider: ProviderType, error: Error) => void;
+  /** Called when falling back to a provider with fewer capabilities */
+  onCapabilityWarning?: (warning: CapabilityWarning) => void;
+  /** If true, fail immediately without trying fallback providers */
+  disableFallback?: boolean;
+}
+
+/**
+ * Error thrown when all providers in the fallback chain fail.
+ * Contains detailed information about each failed attempt.
+ */
+export class AllProvidersFailedError extends Error {
+  public readonly name = 'AllProvidersFailedError';
+
+  constructor(
+    /** All failed provider attempts in order */
+    public readonly attempts: ProviderAttempt[],
+    message?: string
+  ) {
+    const providers = attempts.map((a) => a.provider).join(' → ');
+    super(message ?? `All LLM providers failed. Tried: ${providers}`);
+  }
+
+  /**
+   * Get the last error in the chain (most recent failure).
+   */
+  get lastError(): Error | undefined {
+    return this.attempts[this.attempts.length - 1]?.error;
+  }
 }
 
 /**
@@ -75,55 +160,119 @@ export interface LLMProviderOptions {
 
   /** Ollama-specific options */
   ollama?: Omit<OllamaProviderOptions, 'model' | 'skipAvailabilityCheck'>;
+
+  /** Fallback behavior options */
+  fallback?: FallbackOptions;
 }
 
 // ============================================================================
-// FACTORY FUNCTION
+// FALLBACK CONSTANTS
 // ============================================================================
 
 /**
- * Create an LLM provider based on configuration.
- *
- * This is the main entry point for getting an LLM provider in the CLI.
- * It reads config.default_provider and config.default_model to determine
- * which provider to create and how to configure it.
- *
- * @param config - Application configuration (from loadConfig())
- * @param options - Optional overrides and provider-specific options
- * @returns Provider instance with metadata
- * @throws Error if the configured provider cannot be created
- *
- * @example
- * ```typescript
- * // Basic usage - uses config defaults
- * const { provider, name, model } = await createLLMProvider(config);
- * console.log(`Using ${name} with model ${model}`);
- *
- * // Override model
- * const { provider } = await createLLMProvider(config, {
- *   model: 'claude-3-opus-20240229',
- * });
- *
- * // Skip availability check for faster startup
- * const { provider } = await createLLMProvider(config, {
- *   skipAvailabilityCheck: true,
- * });
- *
- * // Provider-specific options
- * const { provider } = await createLLMProvider(config, {
- *   openai: {
- *     organization: 'org-xxx',
- *     baseURL: 'https://openrouter.ai/api/v1',
- *   },
- * });
- * ```
+ * Default fallback chain for each provider.
+ * When primary fails, try these in order.
  */
-export async function createLLMProvider(
+const DEFAULT_FALLBACK_CHAINS: Record<ProviderType, ProviderType[]> = {
+  anthropic: ['openai', 'ollama'],
+  openai: ['anthropic', 'ollama'],
+  ollama: ['anthropic', 'openai'],
+};
+
+/**
+ * Default model to use when falling back to a different provider.
+ * Maps fromProvider -> toProvider -> model.
+ */
+const DEFAULT_MODEL_EQUIVALENTS: Record<ProviderType, Record<ProviderType, string>> = {
+  anthropic: {
+    anthropic: DEFAULT_ANTHROPIC_MODEL,
+    openai: DEFAULT_OPENAI_MODEL,
+    ollama: DEFAULT_OLLAMA_MODEL,
+  },
+  openai: {
+    anthropic: DEFAULT_ANTHROPIC_MODEL,
+    openai: DEFAULT_OPENAI_MODEL,
+    ollama: DEFAULT_OLLAMA_MODEL,
+  },
+  ollama: {
+    anthropic: DEFAULT_ANTHROPIC_MODEL,
+    openai: DEFAULT_OPENAI_MODEL,
+    ollama: DEFAULT_OLLAMA_MODEL,
+  },
+};
+
+/**
+ * Known capabilities per provider.
+ * Used to warn when falling back to a less capable provider.
+ */
+const PROVIDER_CAPABILITIES: Record<ProviderType, Set<string>> = {
+  anthropic: new Set(['vision', 'extended-thinking', 'streaming', 'tool-use']),
+  openai: new Set(['vision', 'streaming', 'tool-use', 'json-mode']),
+  ollama: new Set(['streaming', 'tool-use']), // Most local models lack vision
+};
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Get the fallback chain for a provider.
+ * Uses config if specified, otherwise uses defaults.
+ */
+function getFallbackChain(config: Config, primary: ProviderType): ProviderType[] {
+  // If config specifies fallback_providers, use those (filtering out primary)
+  if (config.llm?.fallback_providers) {
+    return config.llm.fallback_providers.filter((p) => p !== primary);
+  }
+  // Otherwise use default chain
+  return DEFAULT_FALLBACK_CHAINS[primary];
+}
+
+/**
+ * Get the appropriate model for a fallback provider.
+ */
+function getFallbackModel(
   config: Config,
-  options: LLMProviderOptions = {}
+  _fromProvider: ProviderType,
+  toProvider: ProviderType
+): string {
+  // Check config for explicit mapping first
+  const configModel = config.llm?.fallback_models?.[toProvider];
+  if (configModel) {
+    return configModel;
+  }
+  // Use default model for the target provider
+  return DEFAULT_MODEL_EQUIVALENTS[toProvider][toProvider];
+}
+
+/**
+ * Compute capabilities lost when falling back from one provider to another.
+ */
+function getLostCapabilities(
+  fromProvider: ProviderType,
+  toProvider: ProviderType
+): string[] {
+  const fromCaps = PROVIDER_CAPABILITIES[fromProvider];
+  const toCaps = PROVIDER_CAPABILITIES[toProvider];
+
+  const lost: string[] = [];
+  for (const cap of fromCaps) {
+    if (!toCaps.has(cap)) {
+      lost.push(cap);
+    }
+  }
+  return lost;
+}
+
+/**
+ * Try to create a single provider. Throws on failure.
+ * This is the core creation logic extracted for reuse.
+ */
+async function tryCreateProvider(
+  providerType: ProviderType,
+  model: string,
+  options: LLMProviderOptions
 ): Promise<LLMProviderResult> {
-  const providerType = config.default_provider;
-  const model = options.model ?? config.default_model;
   const skipAvailabilityCheck = options.skipAvailabilityCheck ?? false;
 
   switch (providerType) {
@@ -167,10 +316,134 @@ export async function createLLMProvider(
     }
 
     default: {
-      // TypeScript exhaustiveness check - this should never happen
-      // if config.default_provider is properly typed
+      // TypeScript exhaustiveness check
       const _exhaustiveCheck: never = providerType;
       throw new Error(`Unknown provider type: ${_exhaustiveCheck}`);
     }
   }
+}
+
+// ============================================================================
+// FACTORY FUNCTION
+// ============================================================================
+
+/**
+ * Create an LLM provider based on configuration with automatic fallback.
+ *
+ * This is the main entry point for getting an LLM provider in the CLI.
+ * It reads config.default_provider and config.default_model to determine
+ * which provider to create and how to configure it.
+ *
+ * If the primary provider fails (invalid API key, unavailable, etc.),
+ * it automatically tries fallback providers in order until one succeeds.
+ *
+ * @param config - Application configuration (from loadConfig())
+ * @param options - Optional overrides and provider-specific options
+ * @returns Provider instance with metadata (includes fallback info)
+ * @throws AllProvidersFailedError if all providers fail
+ *
+ * @example
+ * ```typescript
+ * // Basic usage - uses config defaults with automatic fallback
+ * const { provider, name, model, usedFallback } = await createLLMProvider(config);
+ * if (usedFallback) {
+ *   console.log(`Fell back to ${name}`);
+ * }
+ *
+ * // With fallback callbacks for logging
+ * const { provider } = await createLLMProvider(config, {
+ *   fallback: {
+ *     onFallback: (from, to, reason) => {
+ *       console.log(`Falling back from ${from} to ${to}: ${reason}`);
+ *     },
+ *     onCapabilityWarning: ({ lostCapabilities }) => {
+ *       console.warn(`Lost capabilities: ${lostCapabilities.join(', ')}`);
+ *     },
+ *   },
+ * });
+ *
+ * // Disable fallback - fail immediately if primary unavailable
+ * const { provider } = await createLLMProvider(config, {
+ *   fallback: { disableFallback: true },
+ * });
+ * ```
+ */
+export async function createLLMProvider(
+  config: Config,
+  options: LLMProviderOptions = {}
+): Promise<LLMProviderResultWithFallback> {
+  const primaryProvider = config.default_provider;
+  const primaryModel = options.model ?? config.default_model;
+  const failedAttempts: ProviderAttempt[] = [];
+
+  // Try primary provider first
+  try {
+    const result = await tryCreateProvider(primaryProvider, primaryModel, options);
+    return {
+      ...result,
+      usedFallback: false,
+      requestedProvider: primaryProvider,
+      failedAttempts: [],
+    };
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    failedAttempts.push({
+      provider: primaryProvider,
+      error: err,
+      timestamp: new Date(),
+    });
+    options.fallback?.onProviderFailed?.(primaryProvider, err);
+  }
+
+  // If fallback is disabled, fail immediately
+  if (options.fallback?.disableFallback) {
+    throw new AllProvidersFailedError(failedAttempts);
+  }
+
+  // Try fallback providers in order
+  const fallbackChain = getFallbackChain(config, primaryProvider);
+
+  for (const fallbackProvider of fallbackChain) {
+    const fallbackModel = getFallbackModel(config, primaryProvider, fallbackProvider);
+    const lastError = failedAttempts[failedAttempts.length - 1]?.error;
+
+    // Notify about fallback attempt
+    options.fallback?.onFallback?.(
+      primaryProvider,
+      fallbackProvider,
+      lastError?.message ?? 'Unknown error'
+    );
+
+    // Check for capability loss and warn
+    const lostCapabilities = getLostCapabilities(primaryProvider, fallbackProvider);
+    if (lostCapabilities.length > 0 && options.fallback?.onCapabilityWarning) {
+      options.fallback.onCapabilityWarning({
+        fromProvider: primaryProvider,
+        toProvider: fallbackProvider,
+        lostCapabilities,
+      });
+    }
+
+    // Try the fallback provider
+    try {
+      const result = await tryCreateProvider(fallbackProvider, fallbackModel, options);
+      return {
+        ...result,
+        usedFallback: true,
+        requestedProvider: primaryProvider,
+        failedAttempts,
+      };
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      failedAttempts.push({
+        provider: fallbackProvider,
+        error: err,
+        timestamp: new Date(),
+      });
+      options.fallback?.onProviderFailed?.(fallbackProvider, err);
+    }
+  }
+
+  // All providers failed
+  throw new AllProvidersFailedError(failedAttempts);
 }

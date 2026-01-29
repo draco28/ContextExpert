@@ -43,16 +43,38 @@ export const SearchConfigSchema = z.object({
 });
 
 /**
+ * LLM provider type (used in multiple schemas)
+ */
+export const LLMProviderTypeSchema = z.enum(['anthropic', 'openai', 'ollama']);
+
+/**
+ * LLM configuration with fallback support
+ * This section is optional - defaults work without it
+ */
+export const LLMConfigSchema = z.object({
+  /** Fallback providers in order of preference (omit to use defaults) */
+  fallback_providers: z
+    .array(LLMProviderTypeSchema)
+    .optional()
+    .describe('Fallback providers if primary fails (e.g., ["openai", "ollama"])'),
+  /** Model to use per fallback provider (uses defaults if omitted) */
+  fallback_models: z
+    .record(LLMProviderTypeSchema, z.string())
+    .optional()
+    .describe('Model to use per fallback provider (e.g., { openai: "gpt-4o" })'),
+});
+
+/**
  * Root configuration schema
  * This is the complete shape of config.toml
  */
 export const ConfigSchema = z.object({
   default_model: z.string().describe('Default LLM model for ask command'),
-  default_provider: z
-    .enum(['anthropic', 'openai', 'ollama'])
-    .describe('LLM provider to use'),
+  default_provider: LLMProviderTypeSchema.describe('LLM provider to use'),
   embedding: EmbeddingConfigSchema,
   search: SearchConfigSchema,
+  /** Optional LLM fallback configuration */
+  llm: LLMConfigSchema.optional(),
 });
 
 /**
