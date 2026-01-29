@@ -42,7 +42,7 @@
  */
 
 // ============================================================================
-// Core Factory
+// Core Factories
 // ============================================================================
 
 export {
@@ -50,6 +50,11 @@ export {
   ContextExpertRAGEngine,
   FusionServiceAdapter,
 } from './rag-engine.js';
+
+export {
+  createAssembler,
+  DEFAULT_ASSEMBLER_CONFIG,
+} from './assembler.js';
 
 // ============================================================================
 // Types
@@ -64,6 +69,8 @@ export type {
   OrderingStrategy,
   RAGErrorCode,
 } from './types.js';
+
+export type { AssemblerOptions } from './assembler.js';
 
 // ============================================================================
 // Schemas & Errors

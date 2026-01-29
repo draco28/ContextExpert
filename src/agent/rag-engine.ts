@@ -51,7 +51,6 @@
 
 import {
   RAGEngineImpl,
-  XMLAssembler,
   type Retriever,
   type RetrievalResult,
   type RetrievalOptions,
@@ -60,6 +59,8 @@ import {
   type OrderingStrategy as SDKOrderingStrategy,
   type EmbeddingProvider,
 } from '@contextaisdk/rag';
+
+import { createAssembler } from './assembler.js';
 
 import type { Config } from '../config/schema.js';
 import { createEmbeddingProvider } from '../indexer/embedder/provider.js';
@@ -471,15 +472,9 @@ export async function createRAGEngine(
   // Step 5: Create XMLAssembler (formats context for LLM)
   // =========================================================================
 
-  const assembler = new XMLAssembler({
-    ordering: ragConfig.ordering as SDKOrderingStrategy,
-    tokenBudget: {
-      maxTokens: ragConfig.max_tokens,
-    },
-    // Include helpful metadata in XML for LLM
-    includeFilePath: true,
-    includeLocation: true,
-    includeScores: false, // Don't clutter with scores
+  const assembler = createAssembler({
+    maxTokens: ragConfig.max_tokens,
+    ordering: ragConfig.ordering,
   });
 
   // =========================================================================
