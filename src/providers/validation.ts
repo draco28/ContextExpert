@@ -139,13 +139,35 @@ export function validateOpenAIKey(): ValidationResult {
 }
 
 /**
- * Validate Ollama host URL format.
+ * Validate Ollama host URL format from environment variable.
  * Ollama doesn't require an API key, just a valid host URL.
+ *
+ * NOTE: If you have a custom host URL (from options), use validateOllamaHostUrl() instead.
  *
  * @returns ValidationResult indicating success or failure with details
  */
 export function validateOllamaHost(): ValidationResult {
   const host = getEnv('OLLAMA_HOST');
+  return validateOllamaHostUrl(host);
+}
+
+/**
+ * Validate a specific Ollama host URL.
+ *
+ * Use this when validating a host from options or any source other than env var.
+ * This fixes the bug where validateOllamaHost() would always check the env var
+ * even when a custom host was provided via options.
+ *
+ * @param host - The host URL to validate
+ * @returns ValidationResult indicating success or failure with details
+ *
+ * @example
+ * ```typescript
+ * const host = options.host ?? getOllamaHost();
+ * const validation = validateOllamaHostUrl(host);  // Validates the ACTUAL host
+ * ```
+ */
+export function validateOllamaHostUrl(host: string): ValidationResult {
   const result = OllamaHostSchema.safeParse(host);
 
   if (!result.success) {
@@ -225,6 +247,31 @@ export function getProviderKey(provider: 'anthropic' | 'openai'): string {
     throw new Error(validation.error);
   }
 
+  return getProviderKeyUnsafe(provider);
+}
+
+/**
+ * Get API key WITHOUT validation.
+ *
+ * ONLY call this after you've already validated with validateProviderKey()
+ * or the provider-specific validation function. This avoids redundant validation
+ * when you've already checked the key is valid.
+ *
+ * @internal Use getProviderKey() for external/public use.
+ *
+ * @param provider - The provider to get the key for
+ * @returns The API key string
+ * @throws Error if key is not configured (but NOT format validation)
+ *
+ * @example
+ * ```typescript
+ * // Internal use after explicit validation
+ * const validation = validateAnthropicKey();
+ * if (!validation.valid) { throw... }
+ * const apiKey = getProviderKeyUnsafe('anthropic');  // Skip redundant validation
+ * ```
+ */
+export function getProviderKeyUnsafe(provider: 'anthropic' | 'openai'): string {
   const key =
     provider === 'anthropic'
       ? getEnv('ANTHROPIC_API_KEY')
