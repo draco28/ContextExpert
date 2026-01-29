@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { RAGConfigSchema } from '../agent/types.js';
 
 /**
  * Embedding provider configuration
@@ -75,6 +76,8 @@ export const ConfigSchema = z.object({
   search: SearchConfigSchema,
   /** Optional LLM fallback configuration */
   llm: LLMConfigSchema.optional(),
+  /** Optional RAG pipeline configuration */
+  rag: RAGConfigSchema.optional(),
 });
 
 /**
