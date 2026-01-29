@@ -35,66 +35,58 @@
  * ```
  */
 
-import {
-  XMLAssembler,
-  type OrderingStrategy as SDKOrderingStrategy,
-} from '@contextaisdk/rag';
-import type { OrderingStrategy } from './types.js';
+import { z } from 'zod';
+import { XMLAssembler, type OrderingStrategy } from '@contextaisdk/rag';
+
+// Re-export SDK's ordering strategy to avoid type mismatches
+// This ensures our type always matches what the SDK expects
+export type { OrderingStrategy };
 
 // ============================================================================
-// CONFIGURATION TYPES
+// CONFIGURATION SCHEMA
 // ============================================================================
+
+/**
+ * Zod schema for assembler options validation.
+ *
+ * Validates:
+ * - maxTokens: positive integer between 100 and 32000
+ * - ordering: one of 'relevance', 'sandwich', 'chronological'
+ * - deduplicationThreshold: number between 0 and 1
+ * - includeScores: boolean
+ */
+export const AssemblerOptionsSchema = z.object({
+  maxTokens: z
+    .number()
+    .int('maxTokens must be an integer')
+    .min(100, 'maxTokens must be at least 100')
+    .max(32000, 'maxTokens cannot exceed 32000')
+    .optional(),
+
+  ordering: z
+    .enum(['relevance', 'sandwich', 'chronological'], {
+      errorMap: () => ({
+        message: "ordering must be 'relevance', 'sandwich', or 'chronological'",
+      }),
+    })
+    .optional(),
+
+  deduplicationThreshold: z
+    .number()
+    .min(0, 'deduplicationThreshold must be between 0 and 1')
+    .max(1, 'deduplicationThreshold must be between 0 and 1')
+    .optional(),
+
+  includeScores: z.boolean().optional(),
+});
 
 /**
  * Options for creating an XMLAssembler.
  *
  * All options are optional - defaults are optimized for code context.
+ * Validated at runtime via Zod schema.
  */
-export interface AssemblerOptions {
-  /**
-   * Maximum tokens in assembled context.
-   *
-   * Controls how many search results fit in the LLM context.
-   * Larger = more context but higher cost and potential dilution.
-   *
-   * @default 4000
-   */
-  maxTokens?: number;
-
-  /**
-   * Ordering strategy for chunks in assembled context.
-   *
-   * - 'relevance': Most relevant first (traditional)
-   * - 'sandwich': Most relevant at start AND end (recommended)
-   * - 'chronological': By file/line order
-   *
-   * Sandwich ordering leverages the "lost in the middle" phenomenon
-   * where LLMs pay less attention to middle content.
-   *
-   * @default 'sandwich'
-   */
-  ordering?: OrderingStrategy;
-
-  /**
-   * Jaccard similarity threshold for deduplication.
-   *
-   * Chunks with similarity above this threshold are deduplicated
-   * (highest-scoring chunk kept). Range: 0-1.
-   *
-   * @default 0.8
-   */
-  deduplicationThreshold?: number;
-
-  /**
-   * Include relevance scores in XML output.
-   *
-   * When true, adds score="0.95" attributes to source tags.
-   * Usually disabled for cleaner output.
-   *
-   * @default false
-   */
-  includeScores?: boolean;
-}
+export type AssemblerOptions = z.infer<typeof AssemblerOptionsSchema>;
 
 // ============================================================================
 // DEFAULTS
@@ -149,7 +141,12 @@ export const DEFAULT_ASSEMBLER_CONFIG: Required<AssemblerOptions> = {
  * ```
  */
 export function createAssembler(options?: AssemblerOptions): XMLAssembler {
-  // Merge provided options with defaults
+  // Validate options if provided (throws ZodError with clear message)
+  if (options) {
+    AssemblerOptionsSchema.parse(options);
+  }
+
+  // Merge validated options with defaults
   const config: Required<AssemblerOptions> = {
     ...DEFAULT_ASSEMBLER_CONFIG,
     ...options,
@@ -160,8 +157,8 @@ export function createAssembler(options?: AssemblerOptions): XMLAssembler {
     rootTag: 'sources',
     sourceTag: 'source',
 
-    // Ordering strategy (cast to SDK type)
-    ordering: config.ordering as SDKOrderingStrategy,
+    // Ordering strategy (no cast needed - we use SDK type directly)
+    ordering: config.ordering,
 
     // Token budget management
     tokenBudget: {

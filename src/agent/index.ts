@@ -54,6 +54,7 @@ export {
 export {
   createAssembler,
   DEFAULT_ASSEMBLER_CONFIG,
+  AssemblerOptionsSchema,
 } from './assembler.js';
 
 // ============================================================================
