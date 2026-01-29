@@ -9,7 +9,7 @@
  */
 
 import { OpenAIProvider } from '@contextaisdk/provider-openai';
-import { validateOpenAIKey, getProviderKey } from './validation.js';
+import { validateOpenAIKey, getProviderKeyUnsafe } from './validation.js';
 
 // ============================================================================
 // TYPES
@@ -122,8 +122,8 @@ export async function createOpenAIProvider(
     throw new Error(`${validation.error}\n\n${validation.setupInstructions}`);
   }
 
-  // 2. Get API key securely
-  const apiKey = getProviderKey('openai');
+  // 2. Get API key securely (skip redundant validation since we just validated)
+  const apiKey = getProviderKeyUnsafe('openai');
 
   // 3. Determine model to use
   const model = options.model ?? DEFAULT_OPENAI_MODEL;

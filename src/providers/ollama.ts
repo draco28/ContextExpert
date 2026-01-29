@@ -11,7 +11,7 @@
  */
 
 import { OllamaProvider } from '@contextaisdk/provider-ollama';
-import { validateOllamaHost } from './validation.js';
+import { validateOllamaHostUrl } from './validation.js';
 import { getOllamaHost } from '../config/env.js';
 
 // ============================================================================
@@ -131,8 +131,8 @@ export async function createOllamaProvider(
   // 1. Determine host URL (options > env > default)
   const host = options.host ?? getOllamaHost();
 
-  // 2. Validate host URL format
-  const validation = validateOllamaHost();
+  // 2. Validate host URL format (validates the ACTUAL host, not just env var)
+  const validation = validateOllamaHostUrl(host);
   if (!validation.valid) {
     throw new Error(`${validation.error}\n\n${validation.setupInstructions}`);
   }

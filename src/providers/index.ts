@@ -20,7 +20,9 @@ export {
   validateAnthropicKey,
   validateOpenAIKey,
   validateOllamaHost,
+  validateOllamaHostUrl,
   getProviderKey,
+  getProviderKeyUnsafe,
   type ValidationResult,
 } from './validation.js';
 

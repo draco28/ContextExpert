@@ -9,7 +9,7 @@
  */
 
 import { AnthropicProvider } from '@contextaisdk/provider-anthropic';
-import { validateAnthropicKey, getProviderKey } from './validation.js';
+import { validateAnthropicKey, getProviderKeyUnsafe } from './validation.js';
 
 // ============================================================================
 // TYPES
@@ -109,8 +109,8 @@ export async function createAnthropicProvider(
     throw new Error(`${validation.error}\n\n${validation.setupInstructions}`);
   }
 
-  // 2. Get API key securely (only after validation passes)
-  const apiKey = getProviderKey('anthropic');
+  // 2. Get API key securely (skip redundant validation since we just validated)
+  const apiKey = getProviderKeyUnsafe('anthropic');
 
   // 3. Determine model to use
   const model = options.model ?? DEFAULT_ANTHROPIC_MODEL;
