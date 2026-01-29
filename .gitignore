@@ -1,6 +1,10 @@
 # Claude Code
 .claude/
 
+# OpenCode configuration and skills
+.opencode/
+opencode.json
+
 # MCP configuration
 .mcp.json
 

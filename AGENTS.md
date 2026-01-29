@@ -1,4 +1,4 @@
-# Context_Expert - AI Agent Resources
+# Context_Expert - OpenCode Workflow Guide
 
 **Project ID**: 10
 **MCP Server**: https://projectpulsemcp.dracodev.dev/mcp
@@ -6,238 +6,194 @@
 
 ---
 
-## Overview
+## Quick Start
 
-This document catalogs all AI agent resources available for Context_Expert via ProjectPulse MCP.
+Initialize the project session:
 
-Resources are loaded on-demand to save tokens. Use `list` tools to discover what's available, then `get` tools to load specific resources when needed.
+```bash
+/init
+```
+
+Chat with the agent:
+
+```
+"Implement the project indexing feature"
+"Fix the bug in the search command"
+```
 
 ---
 
-## Available Personas
+## 🚀 Daily Workflow
 
-Personas define expert behaviors and domain knowledge. Load one to adopt its expertise.
+### 1. Load Context (Crucial)
 
-### How to Use Personas
+Start every session by loading the project context from ProjectPulse:
 
-```
-# List all available personas
-projectpulse_persona_list(projectId: 10)
-
-# Load a specific persona
-projectpulse_persona_get(projectId: 10, slug: "<persona-slug>")
-→ Returns: name, systemPrompt, expertise, rules, skills, tools
+```javascript
+projectpulse_context_load({ projectId: 10 });
 ```
 
-### Persona Catalog
+This loads the project brief, tech stack, and active tasks into memory.
 
-### DevOps & Release Expert
+### 2. Manage Tasks
 
-**Slug**: `devops-release-expert`
-**Expertise**: npm Publishing, GitHub Actions, Semantic Versioning, CI/CD, Release Management
+Use the ProjectPulse ticket system to track work:
 
-Expert in npm package publishing, GitHub Actions CI/CD, and release management for CLI tools
+```javascript
+// Find your tickets
+projectpulse_ticket_search({ sprintNumber: 1, status: ['todo'] });
 
-### RAG Pipeline Expert
-
-**Slug**: `rag-pipeline-expert`
-**Expertise**: ContextAI SDK, RAG Pipelines, Vector Search, Embeddings, Reranking
-
-Expert in Retrieval-Augmented Generation pipelines using ContextAI SDK for embeddings, retrieval, and reranking
-
-### SQLite & Storage Expert
-
-**Slug**: `sqlite-storage-expert`
-**Expertise**: SQLite, better-sqlite3, BLOB Storage, Schema Design, Index Optimization
-
-Expert in SQLite database design, better-sqlite3, and vector storage patterns for local-first applications
-
-### Testing & Quality Expert
-
-**Slug**: `testing-quality-expert`
-**Expertise**: Vitest, Unit Testing, Integration Testing, CLI Testing, Mocking
-
-Expert in testing TypeScript CLI applications with Vitest, including unit tests, integration tests, and CLI testing patterns
-
-### TypeScript CLI Expert
-
-**Slug**: `typescript-cli-expert`
-**Expertise**: Commander.js, Node.js CLI, Terminal UI, Argument Parsing, Zod Validation
-
-Expert in building Node.js CLI applications with TypeScript, Commander.js, and terminal UI patterns
-
----
-
-## Available Skills
-
-Skills contain reusable coding patterns, templates, and conventions for the project.
-
-### How to Use Skills
-
-```
-# List all skills
-projectpulse_skill_list(projectId: 10)
-
-# Filter by category
-projectpulse_skill_list(projectId: 10, category: "framework")
-
-# Load a specific skill
-projectpulse_skill_get(projectId: 10, slug: "<skill-slug>")
-→ Returns: Full content with code examples
-```
-
-### Skills by Category
-
-#### framework
-
-| Title | Slug | Description |
-|-------|------|-------------|
-| ContextAI SDK RAG Integration | `contextai-rag-integration` | Complete RAG pipeline setup using ContextAI SDK with hybrid retrieval, reranking, and agent integration |
-| Commander.js CLI Pattern | `commander-pattern` | Standard pattern for defining CLI commands with Commander.js, including options, arguments, and help text |
-| SQLite BLOB Vector Storage | `sqlite-vector-storage` | Pattern for storing and retrieving vector embeddings as BLOBs in SQLite using better-sqlite3 |
-| Zod CLI Validation | `zod-cli-validation` | Pattern for validating CLI arguments and options using Zod schemas with helpful error messages |
-
-#### workflow
-
-| Title | Slug | Description |
-|-------|------|-------------|
-| Streaming Response Pattern | `streaming-response-pattern` | Pattern for streaming LLM responses in CLI applications with real-time output and thought visualization |
-| CLI Error Handling Pattern | `cli-error-handling` | User-friendly error handling pattern for CLI applications with actionable messages and recovery hints |
-
----
-
-## Standard Operating Procedures (SOPs)
-
-SOPs provide step-by-step procedures for common tasks.
-
-### How to Use SOPs
-
-```
-# List all SOPs
-projectpulse_sop_list(projectId: 10)
-
-# Filter by category
-projectpulse_sop_list(projectId: 10, category: "Development")
-
-# Load a specific SOP
-projectpulse_sop_get(projectId: 10, slug: "<sop-slug>")
-→ Returns: Full procedure with steps and checklists
-```
-
-### SOPs by Category
-
-#### Deployment
-
-| Title | Slug | Description |
-|-------|------|-------------|
-| npm Package Release | `npm-release` | Complete procedure for releasing a new version of Context Expert to npm |
-
-#### Development
-
-| Title | Slug | Description |
-|-------|------|-------------|
-| Adding a New CLI Command | `add-cli-command` | Step-by-step procedure for adding a new command to the Context Expert CLI |
-| SQLite Schema Migration | `sqlite-migration` | Procedure for safely modifying the SQLite database schema |
-
-#### Testing
-
-| Title | Slug | Description |
-|-------|------|-------------|
-| Running Tests | `running-tests` | Standard procedure for running the Context Expert test suite |
-
----
-
-## Workflow Templates
-
-Workflow templates define multi-step processes for common tasks.
-
-### How to Use Workflows
-
-```
-# List available workflows
-projectpulse_workflow_list(projectId: 10)
-
-# Start a workflow
-projectpulse_workflow_start({
-  templateId: 1,
+// Start a session for a ticket
+projectpulse_agent_session_start({
   projectId: 10,
-  initialContext: { featureName: "auth" }
-})
-
-# Execute current step
-projectpulse_workflow_executeStep({ runId: 123, stepResult: {...} })
-
-# Check status
-projectpulse_workflow_getStatus({ runId: 123 })
+  name: 'Implement Feature X',
+  activeTicketIds: [123],
+});
 ```
 
 ---
 
-## Knowledge Base
+## 🤖 Specialized Agents
 
-Project knowledge items store decisions, discoveries, and solutions.
+We have specialized agents available as subagents. Invoke them with `@` or let the main agent delegate to them.
 
-### How to Access Knowledge
+| Agent | Mention | Expertise |
+|-------|---------|-----------|
+| **CLI Architect** | `@cli-architect` | Commander.js, Node.js CLI, Terminal UI, Zod Validation |
+| **RAG Engineer** | `@rag-engineer` | ContextAI SDK, RAG Pipelines, Vector Search, Embeddings |
+| **Storage Expert** | `@storage-expert` | SQLite, better-sqlite3, BLOB Storage, Schema Design |
+| **Test Engineer** | `@test-engineer` | Vitest, Unit Testing, CLI Testing, Mocking |
+| **Code Reviewer** | `@code-reviewer` | Code Review, Gap Analysis, ProjectPulse Integration |
 
-```
-# Search knowledge
-projectpulse_knowledge_search({
-  projectId: 10,
-  query: "authentication",
-  mode: "hybrid"
-})
+Example:
 
-# Get full item
-projectpulse_knowledge_get({
-  projectId: 10,
-  itemId: 123
-})
-```
+> `@cli-architect` Add a new command to export project data as JSON.
 
 ---
 
-## Wiki
+## 🧠 Skills & SOPs
 
-Project documentation in wiki format.
+Reusable patterns and procedures are available via the `skill` tool.
 
-### How to Access Wiki
+**Usage:**
 
+```javascript
+skill({ name: 'typescript-cli-patterns' });
+skill({ name: 'rag-integration' });
+skill({ name: 'code-reviewer' });
 ```
-# Search wiki
-projectpulse_wiki_search({ query: "API reference" })
 
-# Get page by path
-projectpulse_wiki_get({ path: "/guides/api-reference" })
-```
+**Available Skills:**
+
+**Framework Skills:**
+- `typescript-cli-patterns` - Commander.js patterns, Zod validation, terminal UI
+- `rag-integration` - ContextAI SDK RAG pipeline, hybrid retrieval, reranking
+- `sqlite-patterns` - BLOB vector storage, schema design, query optimization
+- `testing-patterns` - Vitest mocking, async testing, CLI testing
+- `error-handling` - Typed errors, recovery hints, retry logic
+- `security-checklist` - Security review patterns, input validation
+
+**Workflow Skills:**
+- `code-reviewer` - Review tickets in "in-review" status, detect gaps, move tickets (activate with `/review`)
+
+**Standard Operating Procedures (SOPs):**
+
+- `commander-pattern` - CLI command structure and validation
+- `contextai-rag-integration` - RAG pipeline setup
+- `sqlite-vector-storage` - Vector storage patterns
+- `zod-cli-validation` - Input validation
+- `streaming-response-pattern` - Streaming LLM responses
+- `cli-error-handling` - User-friendly error messages
+- `npm-release-sop` - npm publishing
+- `add-cli-command-sop` - Adding new commands
+- `sqlite-migration-sop` - Database migrations
+- `running-tests-sop` - Running the test suite
 
 ---
 
-## Token-Efficient Loading Pattern
+## 🛠 ProjectPulse MCP Tools
 
-To minimize token usage, follow this pattern:
+Full access to the ProjectPulse ecosystem is available via MCP tools:
 
-```
-1. Start with context_load (all memory banks)
-   → Get project brief, patterns, tech context
-
-2. List resources when needed
-   → persona_list, skill_list, sop_list return metadata only (~100 tokens each)
-
-3. Load full content on-demand
-   → persona_get, skill_get, sop_get return full content
-
-4. Search before creating
-   → knowledge_search, wiki_search to find existing info
-```
+- **Knowledge Base**: `projectpulse_knowledge_search`
+- **Wiki**: `projectpulse_wiki_search`
+- **Roadmap**: `projectpulse_sprint_getCurrentPosition`
+- **Kanban**: `projectpulse_kanban_getBoard`
+- **Tickets**: `projectpulse_ticket_get`, `projectpulse_ticket_addComment`
+- **Agent Sessions**: `projectpulse_agent_session_start`, `projectpulse_agent_session_end`
 
 ---
 
-## Dashboard
+## 📋 Code Review Workflow
 
-View and manage all resources:
+The `/review` command activates the code reviewer skill:
 
-- **Overview**: https://projectpulse.dracodev.dev/projects/10
-- **Personas**: https://projectpulse.dracodev.dev/projects/10/personas
-- **Skills**: https://projectpulse.dracodev.dev/projects/10/skills
-- **SOPs**: https://projectpulse.dracodev.dev/projects/10/sops
-- **Knowledge**: https://projectpulse.dracodev.dev/projects/10/knowledge
+```bash
+/review [ticket-number]
+```
+
+**Workflow:**
+
+1. Load context: `projectpulse_context_load({ projectId: 10 })`
+2. Get kanban board: `projectpulse_kanban_getBoard()`
+3. For each ticket in "in-review":
+   - Get ticket details: `projectpulse_ticket_get()`
+   - Analyze git history (git log, git diff)
+   - Review code files
+   - Check for gaps across 10 categories:
+     - Functionality, Testing, Type Safety, API Design
+     - Error Handling, Security, Performance
+     - Documentation, Accessibility, Code Quality
+   - If gaps found: add comment + move to "in-progress"
+   - If no gaps: add approval + move to "done"
+
+**Gap Categories:**
+
+All gap categories are checked during review, with gaps categorized based on the ticket's work:
+- **Functionality** - Requirements met? Edge cases?
+- **Testing** - Tests added? Edge cases covered?
+- **Type Safety** - No `any`? Proper generics?
+- **API Design** - Interface-first? Consistent?
+- **Error Handling** - Proper errors? No swallowing?
+- **Security** - Input validation? No injection? Secrets protected?
+- **Performance** - No N+1? Proper memoization?
+- **Documentation** - JSDoc? Examples? Changelog?
+- **Accessibility** - A11y considered?
+- **Code Quality** - Readable? No duplication?
+
+---
+
+## Token Efficiency
+
+1. **Load Context First**: Use `projectpulse_context_load({ projectId: 10 })`.
+2. **Use Specialized Agents**: They have focused system prompts (e.g., `@cli-architect`).
+3. **Load Skills On-Demand**: Don't ask for "all skills", ask for specific ones using `skill()`.
+
+---
+
+## 🎯 Quick Reference
+
+```javascript
+// Load project context
+projectpulse_context_load({ projectId: 10 })
+
+// Review tickets
+/review                    // Review all tickets in "in-review"
+/review 5                  // Review specific ticket #5
+
+// Use specialized agents
+@cli-architect            // Get help with CLI development
+@rag-engineer             // Get help with RAG implementation
+@storage-expert           // Get help with database design
+@test-engineer            // Get help with testing
+@code-reviewer            // Get help with code review
+
+// Load skills
+skill({ name: 'typescript-cli-patterns' })
+skill({ name: 'rag-integration' })
+skill({ name: 'sqlite-patterns' })
+
+// Access knowledge
+projectpulse_knowledge_search({ projectId: 10, query: "RAG pipeline" })
+projectpulse_wiki_search({ query: "CLI commands" })
+```
