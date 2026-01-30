@@ -297,7 +297,7 @@ export class RAGEngineError extends Error {
   static retrievalFailed(reason: string, cause?: Error): RAGEngineError {
     return new RAGEngineError(
       RAGErrorCodes.RETRIEVAL_FAILED,
-      `Search failed: ${reason}`,
+      `RAG retrieval failed: ${reason}`,
       cause
     );
   }
