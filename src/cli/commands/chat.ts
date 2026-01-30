@@ -20,6 +20,7 @@
 import * as readline from 'node:readline';
 import { Command } from 'commander';
 import chalk from 'chalk';
+import ora from 'ora';
 import { existsSync } from 'node:fs';
 import type { CommandContext } from '../types.js';
 import {
@@ -70,6 +71,8 @@ interface ChatState {
   providerInfo: { name: string; model: string };
   /** Loaded config (cached) */
   config: Config;
+  /** Readline interface for prompt updates (set after REPL starts) */
+  rl?: readline.Interface;
 }
 
 /**
@@ -118,6 +121,45 @@ const SYSTEM_PROMPT_BASE = `You are an expert code assistant helping developers 
 - Be concise but thorough
 - Use code examples when helpful
 - Format code blocks with appropriate language tags`;
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Generate the REPL prompt based on current focus state.
+ * Shows [project-name]> when focused, just > when unfocused.
+ */
+function getPrompt(state: ChatState): string {
+  return state.currentProject
+    ? chalk.green(`[${state.currentProject.name}]> `)
+    : chalk.green('> ');
+}
+
+/**
+ * Get all project names for tab completion.
+ */
+function getAllProjectNames(): string[] {
+  try {
+    runMigrations();
+    const db = getDb();
+    const projects = db
+      .prepare('SELECT name FROM projects ORDER BY name')
+      .all() as Array<{ name: string }>;
+    return projects.map((p) => p.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Update the readline prompt to reflect current state.
+ */
+function updatePrompt(state: ChatState): void {
+  if (state.rl) {
+    state.rl.setPrompt(getPrompt(state));
+  }
+}
 
 // ============================================================================
 // REPL Commands Registry
@@ -180,6 +222,7 @@ const REPL_COMMANDS: REPLCommand[] = [
       );
       state.currentProject = project;
       state.ragEngine = newRagEngine;
+      updatePrompt(state);
 
       ctx.log(chalk.blue(`Focused on: ${project.name}`));
       if (!existsSync(project.path)) {
@@ -199,6 +242,7 @@ const REPL_COMMANDS: REPLCommand[] = [
         ctx.log(chalk.blue(`Unfocused from: ${state.currentProject.name}`));
         state.currentProject = null;
         state.ragEngine = null;
+        updatePrompt(state);
       } else {
         ctx.log(chalk.dim('No project is currently focused'));
       }
@@ -356,8 +400,22 @@ async function streamResponse(
     temperature: 0.3,
   });
 
+  let inThinking = false;
+
   for await (const chunk of stream) {
-    if (chunk.type === 'text' && chunk.content) {
+    if (chunk.type === 'thinking' && chunk.content) {
+      // Show thinking in dim color (not added to history)
+      if (!inThinking) {
+        process.stdout.write(chalk.dim('[thinking] '));
+        inThinking = true;
+      }
+      process.stdout.write(chalk.dim(chunk.content));
+    } else if (chunk.type === 'text' && chunk.content) {
+      // End thinking block with newline if we were thinking
+      if (inThinking) {
+        console.log();
+        inThinking = false;
+      }
       // Answer in default terminal color (white)
       process.stdout.write(chunk.content);
       chunks.push(chunk.content);
@@ -393,14 +451,21 @@ async function handleQuestion(
 
   // 1. RAG search if focused on a project
   if (state.ragEngine && state.currentProject) {
-    ctx.log(chalk.dim(`Searching ${state.currentProject.name}...`));
+    const spinner = ora({
+      text: `Searching ${state.currentProject.name}...`,
+      color: 'cyan',
+    }).start();
 
     try {
       const ragResult = await state.ragEngine.search(question, { finalK: 5 });
       ragContext = ragResult.content;
       sources = ragResult.sources;
-      ctx.debug(`Retrieved ${sources.length} sources`);
+      const timeMs = ragResult.metadata?.retrievalMs ?? 0;
+      spinner.succeed(
+        chalk.dim(`Found ${sources.length} sources (${timeMs}ms)`)
+      );
     } catch (error) {
+      spinner.fail(chalk.dim('Search failed, continuing without context'));
       ctx.debug(`RAG search failed: ${error}`);
       // Continue without context
     }
@@ -468,11 +533,36 @@ async function runChatREPL(
   state: ChatState,
   ctx: CommandContext
 ): Promise<void> {
+  /**
+   * Tab completion for REPL commands.
+   * Currently supports project name completion for /focus.
+   */
+  const completer = (line: string): [string[], string] => {
+    // Check for /focus or /f command
+    const focusMatch = line.match(/^\/(focus|f)\s+(.*)$/i);
+    if (focusMatch) {
+      const prefix = focusMatch[1]; // 'focus' or 'f'
+      const partial = focusMatch[2].toLowerCase();
+      const projectNames = getAllProjectNames();
+      const matches = projectNames
+        .filter((name) => name.toLowerCase().startsWith(partial))
+        .map((name) => `/${prefix} ${name}`);
+      return [matches, line];
+    }
+
+    // No completion for other input
+    return [[], line];
+  };
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: chalk.green('> '),
+    prompt: getPrompt(state),
+    completer,
   });
+
+  // Store rl in state so handlers can update prompt
+  state.rl = rl;
 
   // Handle Ctrl+C gracefully
   rl.on('SIGINT', () => {
