@@ -8,6 +8,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import type { GlobalOptions, CommandContext } from './types.js';
+import { createAskCommand } from './commands/ask.js';
 import { createConfigCommand } from './commands/config.js';
 import { createIndexCommand } from './commands/index.js';
 import { createListCommand } from './commands/list.js';
@@ -99,29 +100,8 @@ program.addCommand(createListCommand(() => createContext(getGlobalOptions())));
 // Remove command - delete an indexed project and its data (implemented)
 program.addCommand(createRemoveCommand(() => createContext(getGlobalOptions())));
 
-// Ask command - ask a question across indexed projects
-program
-  .command('ask <question>')
-  .description('Ask a question across all indexed projects')
-  .option('-p, --project <name>', 'Limit search to specific project')
-  .option('-k, --top-k <number>', 'Number of context chunks to retrieve', '5')
-  .action(async (question: string, cmdOptions: { project?: string; topK: string }) => {
-    const ctx = createContext(getGlobalOptions());
-    ctx.debug(`Question: ${question}`);
-    ctx.debug(`Options: ${JSON.stringify(cmdOptions)}`);
-
-    if (ctx.options.json) {
-      console.log(JSON.stringify({
-        status: 'placeholder',
-        message: 'Ask command not yet implemented',
-        question,
-        options: cmdOptions,
-      }));
-    } else {
-      ctx.log(chalk.yellow('Ask command not yet implemented'));
-      ctx.log(`Would search for: ${chalk.cyan(question)}`);
-    }
-  });
+// Ask command - RAG-powered Q&A across indexed projects
+program.addCommand(createAskCommand(() => createContext(getGlobalOptions())));
 
 // Search command - hybrid search (dense + BM25 + RRF fusion)
 program.addCommand(createSearchCommand(() => createContext(getGlobalOptions())));
