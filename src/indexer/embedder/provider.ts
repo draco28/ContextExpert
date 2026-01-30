@@ -26,6 +26,7 @@ import type {
   ProviderOptions,
   EmbeddingProviderResult,
 } from './types.js';
+import { type Logger, consoleLogger } from '../../utils/index.js';
 
 /**
  * Model name mapping for different providers.
@@ -99,12 +100,13 @@ async function createOllamaProvider(
  * Logs errors before returning false to aid debugging fallback behavior.
  */
 async function isProviderAvailable(
-  provider: EmbeddingProvider
+  provider: EmbeddingProvider,
+  logger: Logger = consoleLogger
 ): Promise<boolean> {
   try {
     return await provider.isAvailable();
   } catch (error) {
-    console.warn(
+    logger.warn(
       `Provider availability check failed: ${error instanceof Error ? error.message : String(error)}`
     );
     return false;
@@ -173,7 +175,7 @@ export async function createEmbeddingProvider(
     }
 
     // Verify provider is available
-    if (provider && (await isProviderAvailable(provider))) {
+    if (provider && (await isProviderAvailable(provider, options?.logger))) {
       // Wrap with caching for efficiency
       // CachedEmbeddingProvider deduplicates identical text inputs
       return {
@@ -202,7 +204,7 @@ export async function createEmbeddingProvider(
         provider = await createOllamaProvider(config.fallback_model);
       }
 
-      if (provider && (await isProviderAvailable(provider))) {
+      if (provider && (await isProviderAvailable(provider, options?.logger))) {
         options?.onProgress?.({
           status: `Using fallback provider: ${config.fallback_provider}`,
         });

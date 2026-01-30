@@ -124,6 +124,7 @@ describe('createChatCommand', () => {
         sources: [{ id: 1, filePath: 'src/file.ts', score: 0.9 }],
         metadata: { retrievalMs: 100, assemblyMs: 20, totalMs: 120 },
       }),
+      dispose: vi.fn(),
     };
     vi.mocked(ragEngine.createRAGEngine).mockResolvedValue(
       mockRAGEngine as unknown as ReturnType<typeof ragEngine.createRAGEngine>

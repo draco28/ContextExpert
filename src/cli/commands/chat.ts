@@ -92,6 +92,29 @@ interface REPLCommand {
   ) => Promise<boolean>;
 }
 
+/**
+ * Clean up resources held by the chat state.
+ *
+ * Call on all exit paths to prevent memory leaks:
+ * - SIGINT (Ctrl+C)
+ * - exit/quit command
+ * - Normal REPL loop exit
+ *
+ * Releases:
+ * - RAG engine (which clears vector store and BM25 caches)
+ * - Conversation context
+ */
+function cleanupChatState(state: ChatState): void {
+  // Dispose RAG engine (clears search store caches)
+  if (state.ragEngine) {
+    state.ragEngine.dispose();
+    state.ragEngine = null;
+  }
+
+  // Clear conversation context
+  state.conversationContext.clear();
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -331,8 +354,9 @@ const REPL_COMMANDS: REPLCommand[] = [
     name: 'exit',
     aliases: ['quit', 'q'],
     description: 'Exit the chat',
-    handler: async (_args, _state, ctx) => {
+    handler: async (_args, state, ctx) => {
       ctx.log(chalk.dim('Goodbye!'));
+      cleanupChatState(state);
       return false; // Signal to exit REPL
     },
   },
@@ -600,6 +624,7 @@ async function runChatREPL(
   rl.on('SIGINT', () => {
     ctx.log('');
     ctx.log(chalk.dim('Goodbye!'));
+    cleanupChatState(state);
     rl.close();
   });
 
@@ -651,6 +676,10 @@ async function runChatREPL(
 
     rl.prompt();
   }
+
+  // Cleanup on natural loop exit (e.g., EOF on stdin)
+  // This is a safety net - exit command and SIGINT already call cleanup
+  cleanupChatState(state);
 }
 
 // ============================================================================

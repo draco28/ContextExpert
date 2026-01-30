@@ -22,7 +22,7 @@ import {
   validateRows,
   type ChunkLoadNoEmbeddingRow,
 } from '../database/validation.js';
-import { safeJsonParse } from '../utils/index.js';
+import { safeJsonParse, type Logger, consoleLogger } from '../utils/index.js';
 import type { BM25Config, IndexBuildProgress } from './types.js';
 
 /** Batch size for loading chunks from SQLite (memory efficiency) */
@@ -86,11 +86,13 @@ export class BM25StoreManager {
    *
    * @param options - Store configuration including projectId and BM25 config
    * @param onProgress - Optional callback for progress updates during loading
+   * @param logger - Optional logger for warnings (defaults to console)
    * @returns The initialized BM25 retriever
    */
   async getRetriever(
     options: BM25StoreOptions,
-    onProgress?: (progress: IndexBuildProgress) => void
+    onProgress?: (progress: IndexBuildProgress) => void,
+    logger: Logger = consoleLogger
   ): Promise<BM25Retriever> {
     const { projectId } = options;
 
@@ -105,7 +107,7 @@ export class BM25StoreManager {
     }
 
     // Build new retriever
-    const buildPromise = this.buildRetriever(options, onProgress);
+    const buildPromise = this.buildRetriever(options, onProgress, logger);
     this.buildingRetrievers.set(projectId, buildPromise);
 
     try {
@@ -124,7 +126,8 @@ export class BM25StoreManager {
    */
   private async buildRetriever(
     options: BM25StoreOptions,
-    onProgress?: (progress: IndexBuildProgress) => void
+    onProgress?: (progress: IndexBuildProgress) => void,
+    logger: Logger = consoleLogger
   ): Promise<BM25Retriever> {
     const { projectId, bm25Config } = options;
 
@@ -199,7 +202,7 @@ export class BM25StoreManager {
             startLine: row.start_line,
             endLine: row.end_line,
             ...safeJsonParse(row.metadata, {}, (err) => {
-              console.warn(`[BM25Store] Skipping corrupted metadata for chunk ${row.id}: ${err.message}`);
+              logger.warn(`[BM25Store] Skipping corrupted metadata for chunk ${row.id}: ${err.message}`);
             }),
           },
         };

@@ -172,6 +172,7 @@ export function createIndexCommand(
           embeddingProvider,
           embeddingModel,
           embeddingDimensions,
+          embeddingTimeout: config.embedding.timeout_ms,
           chunkerConfig: {
             embeddingProvider, // For SemanticChunker on docs
           },

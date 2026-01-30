@@ -20,17 +20,49 @@ import type { EmbeddedChunk, EmbedderOptions } from './types.js';
 const DEFAULT_BATCH_SIZE = 32;
 
 /**
- * Embed a batch of text strings.
+ * Error thrown when an embedding operation times out.
+ */
+export class EmbeddingTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(
+      `Embedding operation timed out after ${timeoutMs}ms. ` +
+      `This can happen if:\n` +
+      `  - The embedding model is being downloaded (first run)\n` +
+      `  - The Ollama server is slow to respond\n` +
+      `  - Network issues with cloud embedding providers\n` +
+      `Consider increasing timeout_ms in ~/.ctx/config.toml`
+    );
+    this.name = 'EmbeddingTimeoutError';
+  }
+}
+
+/**
+ * Embed a batch of text strings with optional timeout.
  *
  * Uses the provider's embedBatch method for efficiency.
- * Falls back to sequential embed() calls if embedBatch fails.
+ * If timeout is specified, the operation will abort after the timeout.
  */
 async function embedBatch(
   provider: EmbeddingProvider,
-  texts: string[]
+  texts: string[],
+  timeout?: number
 ): Promise<Float32Array[]> {
-  // Use batch embedding for efficiency
-  const results = await provider.embedBatch(texts);
+  // If no timeout, call directly
+  if (!timeout) {
+    const results = await provider.embedBatch(texts);
+    return results.map((result) => new Float32Array(result.embedding));
+  }
+
+  // Use Promise.race to implement timeout
+  // This works even if the provider doesn't support AbortController
+  const embeddingPromise = provider.embedBatch(texts);
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(new EmbeddingTimeoutError(timeout));
+    }, timeout);
+  });
+
+  const results = await Promise.race([embeddingPromise, timeoutPromise]);
 
   // Convert number[] to Float32Array for SQLite BLOB storage
   return results.map((result) => new Float32Array(result.embedding));
@@ -74,6 +106,7 @@ export async function embedChunks(
 ): Promise<EmbeddedChunk[]> {
   const {
     batchSize = DEFAULT_BATCH_SIZE,
+    timeout,
     onProgress,
     onError,
   } = options;
@@ -92,8 +125,8 @@ export async function embedChunks(
     const texts = batch.map((chunk) => chunk.content);
 
     try {
-      // Get embeddings for this batch
-      const embeddings = await embedBatch(provider, texts);
+      // Get embeddings for this batch (with timeout if configured)
+      const embeddings = await embedBatch(provider, texts, timeout);
 
       // Combine chunks with their embeddings
       for (let j = 0; j < batch.length; j++) {
@@ -122,7 +155,7 @@ export async function embedChunks(
       // Batch failed - try individual chunks for better error isolation
       for (const chunk of batch) {
         try {
-          const [embedding] = await embedBatch(provider, [chunk.content]);
+          const [embedding] = await embedBatch(provider, [chunk.content], timeout);
 
           if (embedding && embedding.length > 0) {
             embeddedChunks.push({

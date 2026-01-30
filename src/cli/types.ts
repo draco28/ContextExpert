@@ -19,6 +19,8 @@ export interface CommandContext {
   log: (message: string) => void;
   /** Log a debug message (only shown with --verbose) */
   debug: (message: string) => void;
+  /** Log a warning message (yellow, respects --json flag) */
+  warn: (message: string) => void;
   /** Log an error message */
   error: (message: string) => void;
 }

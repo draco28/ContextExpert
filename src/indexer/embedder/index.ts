@@ -39,6 +39,7 @@ export {
   embedChunks,
   embedChunk,
   estimateEmbeddingMemory,
+  EmbeddingTimeoutError,
 } from './embedder.js';
 
 // Types
