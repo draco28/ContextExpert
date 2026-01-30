@@ -9,6 +9,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import type { GlobalOptions, CommandContext } from './types.js';
 import { createAskCommand } from './commands/ask.js';
+import { createChatCommand } from './commands/chat.js';
 import { createConfigCommand } from './commands/config.js';
 import { createIndexCommand } from './commands/index.js';
 import { createListCommand } from './commands/list.js';
@@ -102,6 +103,9 @@ program.addCommand(createRemoveCommand(() => createContext(getGlobalOptions())))
 
 // Ask command - RAG-powered Q&A across indexed projects
 program.addCommand(createAskCommand(() => createContext(getGlobalOptions())));
+
+// Chat command - interactive multi-turn REPL with RAG
+program.addCommand(createChatCommand(() => createContext(getGlobalOptions())));
 
 // Search command - hybrid search (dense + BM25 + RRF fusion)
 program.addCommand(createSearchCommand(() => createContext(getGlobalOptions())));

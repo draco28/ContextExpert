@@ -37,6 +37,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@contextaisdk/core": "^0.1.0",
     "@contextaisdk/provider-anthropic": "^0.1.0",
     "@contextaisdk/provider-ollama": "^0.1.0",
     "@contextaisdk/provider-openai": "^0.1.0",
