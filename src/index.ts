@@ -1,17 +1,45 @@
 /**
  * Context Expert - Library Entry Point
  *
- * This module exports the programmatic API for Context Expert.
- * Use this when integrating Context Expert into other tools or agents.
+ * This module exports low-level utilities for advanced integrations.
+ * For most use cases, use the CLI (`ctx`) which provides the full feature set.
  *
- * @example
- * ```typescript
- * import { ContextExpert } from 'context-expert';
+ * ## Primary Interface
  *
- * const ctx = new ContextExpert();
- * await ctx.indexProject('./my-project');
- * const results = await ctx.search('authentication');
+ * The CLI is the recommended way to use Context Expert:
+ * ```bash
+ * ctx index ./my-project     # Index a project
+ * ctx search "auth"          # Search indexed code
+ * ctx ask "How does auth work?"  # Q&A with RAG
+ * ctx chat                   # Interactive REPL
  * ```
+ *
+ * ## Library Exports
+ *
+ * This module exports database utilities and types for:
+ * - Building custom tools on top of Context Expert's storage
+ * - Plugin/extension development
+ * - Direct database access when CLI is insufficient
+ *
+ * @example Database access
+ * ```typescript
+ * import { getDb, runMigrations } from 'context-expert';
+ *
+ * runMigrations();
+ * const db = getDb();
+ * const projects = db.prepare('SELECT * FROM projects').all();
+ * ```
+ *
+ * @example Type-safe project queries
+ * ```typescript
+ * import type { Project, Chunk } from 'context-expert';
+ * import { getDb } from 'context-expert';
+ *
+ * const db = getDb();
+ * const project = db.prepare('SELECT * FROM projects WHERE name = ?').get('my-project') as Project;
+ * ```
+ *
+ * @packageDocumentation
  */
 
 // Re-export types for library consumers
@@ -39,26 +67,3 @@ export type {
   FileHash,
   FileHashInput,
 } from './database/index.js';
-
-// Placeholder for the main API class
-// This will be implemented in future tickets
-export class ContextExpert {
-  constructor() {
-    // TODO: Initialize database connection, embeddings, etc.
-  }
-
-  async indexProject(_path: string, _options?: { name?: string; tags?: string[] }): Promise<void> {
-    throw new Error('Not yet implemented');
-  }
-
-  async search(_query: string, _options?: { project?: string; limit?: number }): Promise<unknown[]> {
-    throw new Error('Not yet implemented');
-  }
-
-  async ask(_question: string, _options?: { project?: string }): Promise<string> {
-    throw new Error('Not yet implemented');
-  }
-}
-
-// Default export for convenience
-export default ContextExpert;

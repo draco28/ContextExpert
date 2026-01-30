@@ -391,8 +391,10 @@ function getMostRecentProject(): Project | undefined {
 /**
  * Parse user input to detect REPL commands.
  * Returns null if it's a regular question.
+ *
+ * @internal Exported for testing purposes
  */
-function parseREPLCommand(
+export function parseREPLCommand(
   input: string
 ): { command: REPLCommand; args: string[] } | null {
   const trimmed = input.trim();
@@ -583,23 +585,24 @@ function displayWelcome(state: ChatState, ctx: CommandContext): void {
 }
 
 /**
- * Main REPL loop using readline.
+ * Tab completion handler for REPL commands.
+ * Currently supports project name completion for /focus.
+ *
+ * @internal Exported for testing purposes
+ * @param line - The current input line
+ * @param getProjectNames - Function to retrieve project names (injected for testability)
+ * @returns Tuple of [completions, originalLine] as per Node.js readline spec
  */
-async function runChatREPL(
-  state: ChatState,
-  ctx: CommandContext
-): Promise<void> {
-  /**
-   * Tab completion for REPL commands.
-   * Currently supports project name completion for /focus.
-   */
-  const completer = (line: string): [string[], string] => {
-    // Check for /focus or /f command
+export function createCompleter(
+  getProjectNames: () => string[] = getAllProjectNames
+): (line: string) => [string[], string] {
+  return (line: string): [string[], string] => {
+    // Check for /focus or /f command with at least one space after
     const focusMatch = line.match(/^\/(focus|f)\s+(.*)$/i);
     if (focusMatch) {
       const prefix = focusMatch[1] ?? 'focus'; // 'focus' or 'f'
       const partial = (focusMatch[2] ?? '').toLowerCase();
-      const projectNames = getAllProjectNames();
+      const projectNames = getProjectNames();
       const matches = projectNames
         .filter((name) => name.toLowerCase().startsWith(partial))
         .map((name) => `/${prefix} ${name}`);
@@ -609,6 +612,16 @@ async function runChatREPL(
     // No completion for other input
     return [[], line];
   };
+}
+
+/**
+ * Main REPL loop using readline.
+ */
+async function runChatREPL(
+  state: ChatState,
+  ctx: CommandContext
+): Promise<void> {
+  const completer = createCompleter();
 
   const rl = readline.createInterface({
     input: process.stdin,

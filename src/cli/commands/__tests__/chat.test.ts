@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
-import { createChatCommand } from '../chat.js';
+import { createChatCommand, parseREPLCommand, createCompleter } from '../chat.js';
 import type { CommandContext } from '../../types.js';
 import * as database from '../../../database/index.js';
 import * as configLoader from '../../../config/loader.js';
@@ -281,61 +281,254 @@ describe('createChatCommand', () => {
   });
 });
 
-describe('REPL command parsing (exported for testing)', () => {
-  // Note: These tests would require exporting parseREPLCommand
-  // For now, we test through integration or leave as documentation
-  // of expected behavior
-
+describe('parseREPLCommand', () => {
   describe('/help command', () => {
     it('should be recognized with / prefix', () => {
-      // /help -> { command: helpCmd, args: [] }
-      expect(true).toBe(true); // Placeholder - would test parseREPLCommand
+      const result = parseREPLCommand('/help');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('help');
+      expect(result?.args).toEqual([]);
     });
 
-    it('should recognize aliases /h and /?', () => {
-      expect(true).toBe(true);
+    it('should recognize alias /h', () => {
+      const result = parseREPLCommand('/h');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('help');
+    });
+
+    it('should recognize alias /?', () => {
+      const result = parseREPLCommand('/?');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('help');
     });
   });
 
   describe('/focus command', () => {
     it('should parse project name from args', () => {
-      // /focus my-project -> { command: focusCmd, args: ['my-project'] }
-      expect(true).toBe(true);
+      const result = parseREPLCommand('/focus my-project');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('focus');
+      expect(result?.args).toEqual(['my-project']);
     });
 
-    it('should handle multi-word project names', () => {
-      // /focus my cool project -> { command: focusCmd, args: ['my', 'cool', 'project'] }
-      expect(true).toBe(true);
+    it('should handle multi-word project names as separate args', () => {
+      const result = parseREPLCommand('/focus my cool project');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('focus');
+      expect(result?.args).toEqual(['my', 'cool', 'project']);
+    });
+
+    it('should recognize alias /f', () => {
+      const result = parseREPLCommand('/f test-project');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('focus');
+      expect(result?.args).toEqual(['test-project']);
     });
   });
 
   describe('/clear command', () => {
-    it('should clear conversation history', () => {
-      expect(true).toBe(true);
+    it('should be recognized with / prefix', () => {
+      const result = parseREPLCommand('/clear');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('clear');
+    });
+
+    it('should recognize alias /c', () => {
+      const result = parseREPLCommand('/c');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('clear');
     });
   });
 
   describe('exit command', () => {
     it('should work without / prefix', () => {
-      // exit -> { command: exitCmd, args: [] }
-      expect(true).toBe(true);
+      const result = parseREPLCommand('exit');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('exit');
     });
 
     it('should work with quit alias', () => {
-      // quit -> { command: exitCmd, args: [] }
-      expect(true).toBe(true);
+      const result = parseREPLCommand('quit');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('exit');
+    });
+
+    it('should be case-insensitive', () => {
+      expect(parseREPLCommand('EXIT')?.command.name).toBe('exit');
+      expect(parseREPLCommand('Quit')?.command.name).toBe('exit');
     });
   });
 
   describe('regular questions', () => {
     it('should return null for non-command input', () => {
-      // "How does auth work?" -> null
-      expect(true).toBe(true);
+      expect(parseREPLCommand('How does auth work?')).toBeNull();
     });
 
     it('should return null for unknown /commands', () => {
-      // /unknown -> null (treated as question)
-      expect(true).toBe(true);
+      expect(parseREPLCommand('/unknown')).toBeNull();
+    });
+
+    it('should return null for empty input', () => {
+      expect(parseREPLCommand('')).toBeNull();
+      expect(parseREPLCommand('   ')).toBeNull();
+    });
+  });
+});
+
+describe('createCompleter (tab completion)', () => {
+  // Mock project list for testing
+  const mockProjects = ['my-project', 'my-app', 'test-api', 'Demo_Project'];
+  const getProjects = () => mockProjects;
+
+  describe('/focus command completion', () => {
+    it('handles /focus without space (no match)', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus');
+      expect(completions).toEqual([]);
+    });
+
+    it('handles /focus with trailing space only (empty partial)', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus ');
+      // Empty partial should match all projects
+      expect(completions).toEqual([
+        '/focus my-project',
+        '/focus my-app',
+        '/focus test-api',
+        '/focus Demo_Project',
+      ]);
+    });
+
+    it('filters by partial prefix', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus my');
+      expect(completions).toEqual(['/focus my-project', '/focus my-app']);
+    });
+
+    it('returns exact match when partial is complete', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus my-project');
+      expect(completions).toEqual(['/focus my-project']);
+    });
+
+    it('returns empty when no projects match', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus xyz');
+      expect(completions).toEqual([]);
+    });
+  });
+
+  describe('/f shorthand completion', () => {
+    it('handles /f with trailing space', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/f ');
+      expect(completions).toEqual([
+        '/f my-project',
+        '/f my-app',
+        '/f test-api',
+        '/f Demo_Project',
+      ]);
+    });
+
+    it('filters by partial with /f shorthand', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/f test');
+      expect(completions).toEqual(['/f test-api']);
+    });
+
+    it('preserves /f prefix in completions', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/f my');
+      // Should use /f, not /focus
+      expect(completions.every((c) => c.startsWith('/f '))).toBe(true);
+    });
+  });
+
+  describe('case sensitivity', () => {
+    it('matches case-insensitively on partial', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus DEMO');
+      expect(completions).toEqual(['/focus Demo_Project']);
+    });
+
+    it('preserves original project name case in output', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus demo');
+      // Should output "Demo_Project" not "demo_project"
+      expect(completions).toEqual(['/focus Demo_Project']);
+    });
+
+    it('handles mixed case command', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/Focus my');
+      expect(completions).toEqual(['/Focus my-project', '/Focus my-app']);
+    });
+  });
+
+  describe('special characters in project names', () => {
+    it('handles underscores', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus demo_');
+      expect(completions).toEqual(['/focus Demo_Project']);
+    });
+
+    it('handles hyphens', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/focus my-');
+      expect(completions).toEqual(['/focus my-project', '/focus my-app']);
+    });
+  });
+
+  describe('empty project list', () => {
+    it('returns empty completions when no projects exist', () => {
+      const completer = createCompleter(() => []);
+      const [completions] = completer('/focus ');
+      expect(completions).toEqual([]);
+    });
+
+    it('handles error in project retrieval gracefully', () => {
+      const completer = createCompleter(() => {
+        throw new Error('DB error');
+      });
+      // Should throw since we're not catching inside completer
+      expect(() => completer('/focus ')).toThrow('DB error');
+    });
+  });
+
+  describe('non-focus commands', () => {
+    it('returns empty for /help', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/help');
+      expect(completions).toEqual([]);
+    });
+
+    it('returns empty for regular text', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('How does auth work?');
+      expect(completions).toEqual([]);
+    });
+
+    it('returns empty for partial /foc (no space after)', () => {
+      const completer = createCompleter(getProjects);
+      const [completions] = completer('/foc');
+      expect(completions).toEqual([]);
+    });
+  });
+
+  describe('return value structure', () => {
+    it('returns original line as second element', () => {
+      const completer = createCompleter(getProjects);
+      const [, originalLine] = completer('/focus my');
+      expect(originalLine).toBe('/focus my');
+    });
+
+    it('returns tuple matching readline completer spec', () => {
+      const completer = createCompleter(getProjects);
+      const result = completer('/focus test');
+      expect(Array.isArray(result)).toBe(true);
+      expect(result).toHaveLength(2);
+      expect(Array.isArray(result[0])).toBe(true);
+      expect(typeof result[1]).toBe('string');
     });
   });
 });
