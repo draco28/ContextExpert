@@ -31,7 +31,7 @@ import {
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import type { Project } from '../../database/schema.js';
-import type { RAGSearchResult, RAGSource } from '../../agent/types.js';
+import type { RAGSearchResult } from '../../agent/types.js';
 
 // ============================================================================
 // Types
@@ -160,7 +160,7 @@ function resolveProject(projectName?: string): Project {
     );
   }
 
-  const project = projects[0];
+  const project = projects[0]!;
   warnIfPathStale(project);
 
   return project;
