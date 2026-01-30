@@ -18,7 +18,14 @@
  */
 
 // Main chunker functions
-export { chunkFile, chunkFiles, type ChunkerConfig } from './chunker.js';
+export {
+  chunkFile,
+  chunkFiles,
+  // Structured result functions (Ticket #50)
+  chunkFileWithResult,
+  chunkFilesWithResult,
+  type ChunkerConfig,
+} from './chunker.js';
 
 // Types
 export type {
@@ -28,6 +35,10 @@ export type {
   ChunkResult,
   ChunkOptions,
   ExtractionResult,
+  // Structured result types (Ticket #50)
+  SkipReason,
+  FileChunkResult,
+  BatchChunkResult,
 } from './types.js';
 
 // Configuration

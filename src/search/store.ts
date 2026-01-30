@@ -12,26 +12,16 @@ import type Database from 'better-sqlite3';
 
 import { getDb } from '../database/connection.js';
 import { blobToEmbedding } from '../database/schema.js';
+import {
+  ChunkLoadRowSchema,
+  validateRows,
+  type ChunkLoadRow,
+} from '../database/validation.js';
 import { safeJsonParse } from '../utils/index.js';
 import type { SearchServiceOptions, IndexBuildProgress } from './types.js';
 
 /** Batch size for loading chunks from SQLite (memory efficiency) */
 const LOAD_BATCH_SIZE = 1000;
-
-/**
- * Row shape from SQLite chunks table.
- */
-interface ChunkRow {
-  id: string;
-  content: string;
-  embedding: Buffer;
-  file_path: string;
-  file_type: string | null;
-  language: string | null;
-  start_line: number | null;
-  end_line: number | null;
-  metadata: string | null;
-}
 
 /**
  * Manages vector stores for projects.
@@ -172,7 +162,12 @@ export class VectorStoreManager {
         total: totalChunks,
       });
 
-      const batch = stmt.all(projectId, LOAD_BATCH_SIZE, offset) as ChunkRow[];
+      const rawBatch = stmt.all(projectId, LOAD_BATCH_SIZE, offset);
+      const batch: ChunkLoadRow[] = validateRows(
+        ChunkLoadRowSchema,
+        rawBatch,
+        `chunks.project_id=${projectId}`
+      );
 
       if (batch.length === 0) break;
 

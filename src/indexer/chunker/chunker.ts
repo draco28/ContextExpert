@@ -33,6 +33,8 @@ import type {
   ChunkResult,
   ChunkOptions,
   ExtractedSegment,
+  FileChunkResult,
+  BatchChunkResult,
 } from './types.js';
 import {
   extractCodeSegments,
@@ -69,33 +71,44 @@ export interface ChunkerConfig {
   embeddingProvider?: EmbeddingProvider;
 }
 
+// ============================================================================
+// Structured Result Functions (Ticket #50)
+// ============================================================================
+
 /**
- * Chunk a single file into segments ready for embedding.
+ * Chunk a single file with structured result reporting.
  *
- * This is the main entry point for chunking. It:
- * 1. Validates file size (skips files > 500KB)
- * 2. Reads file content
- * 3. Extracts semantic segments (functions, classes, prose sections)
- * 4. Chunks large segments with RecursiveChunker
- * 5. Returns ChunkResult[] with full metadata
+ * Unlike chunkFile(), this returns a FileChunkResult with:
+ * - Explicit success/failure indication
+ * - Reason why file was skipped (if applicable)
+ * - Warnings collected during processing
+ *
+ * Use this when you need to distinguish between different failure modes
+ * or aggregate error statistics.
  *
  * @param fileInfo - File metadata from discovery
  * @param config - Optional chunker configuration
- * @param options - Callbacks for progress/errors
- * @returns Array of chunks ready for embedding
+ * @param options - Callbacks for progress (onChunk only; errors reported in result)
+ * @returns FileChunkResult with success, chunks, and error details
  */
-export async function chunkFile(
+export async function chunkFileWithResult(
   fileInfo: FileInfo,
   config: ChunkerConfig = {},
-  options: ChunkOptions = {}
-): Promise<ChunkResult[]> {
+  options: Pick<ChunkOptions, 'onChunk'> = {}
+): Promise<FileChunkResult> {
+  const warnings: string[] = [];
+
   // Check file size limit
   if (fileInfo.size > MAX_FILE_SIZE) {
-    options.onWarning?.(
-      `Skipping large file (${formatSize(fileInfo.size)} > ${formatSize(MAX_FILE_SIZE)})`,
-      fileInfo.relativePath
-    );
-    return [];
+    const sizeMsg = `${formatSize(fileInfo.size)} > ${formatSize(MAX_FILE_SIZE)}`;
+    return {
+      filePath: fileInfo.relativePath,
+      success: false,
+      chunks: [],
+      skipReason: 'too_large',
+      error: `File too large (${sizeMsg})`,
+      warnings,
+    };
   }
 
   // Read file content
@@ -103,25 +116,55 @@ export async function chunkFile(
   try {
     content = await readFile(fileInfo.path, 'utf-8');
   } catch (error) {
-    options.onError?.(error as Error, fileInfo.relativePath);
-    return [];
+    return {
+      filePath: fileInfo.relativePath,
+      success: false,
+      chunks: [],
+      skipReason: 'read_error',
+      error: (error as Error).message,
+      warnings,
+    };
   }
 
-  // Skip empty files
+  // Empty files are success (valid file, just no content)
   if (!content.trim()) {
-    return [];
+    return {
+      filePath: fileInfo.relativePath,
+      success: true,
+      chunks: [],
+      skipReason: 'empty',
+      warnings,
+    };
   }
 
   // Extract segments based on file type
-  const segments = extractSegments(content, fileInfo);
+  const { segments, error: extractError } = extractSegments(content, fileInfo);
+
+  // Handle extraction/parsing failures
+  if (extractError) {
+    return {
+      filePath: fileInfo.relativePath,
+      success: false,
+      chunks: [],
+      skipReason: 'parse_error',
+      error: `Extraction failed: ${extractError}`,
+      warnings,
+    };
+  }
+
+  // Warn if no segments were extracted from a non-empty file
+  if (segments.length === 0) {
+    warnings.push('No extractable segments found');
+  }
 
   // Chunk each segment
   const chunks: ChunkResult[] = [];
   let chunkIndex = 0;
 
   for (const segment of segments) {
-    // Skip very small segments
+    // Skip very small segments and warn about it
     if (segment.content.length < MIN_CHUNK_SIZE) {
+      warnings.push(`Segment at line ${segment.startLine} too small (${segment.content.length} chars), skipped`);
       continue;
     }
 
@@ -143,12 +186,10 @@ export async function chunkFile(
       }];
     } else if (segment.contentType === 'docs' && config.embeddingProvider) {
       // Docs content with embedding provider → use SemanticChunker
-      // SemanticChunker detects topic boundaries using embedding similarity,
-      // producing more coherent chunks for prose/documentation.
       const semanticChunker = new SemanticChunker({
         embeddingProvider: config.embeddingProvider,
-        similarityThreshold: 0.5, // Balance between too many/few splits
-        minChunkSize: 100, // Minimum tokens per chunk
+        similarityThreshold: 0.5,
+        minChunkSize: 100,
         maxChunkSize: chunkConfig.chunkSize,
       });
 
@@ -166,8 +207,6 @@ export async function chunkFile(
       });
     } else {
       // Code/config content OR no embedding provider → use RecursiveChunker
-      // RecursiveChunker respects syntax boundaries (newlines, braces),
-      // which is better for structured content like code.
       const recursiveChunker = new RecursiveChunker();
 
       const document: Document = {
@@ -186,7 +225,6 @@ export async function chunkFile(
 
     // Map to ChunkResult with full metadata
     for (const chunk of segmentChunks) {
-      // Calculate line numbers for this chunk within the segment
       const { startLine, endLine } = computeLineNumbers(
         segment.content,
         chunk.content,
@@ -205,7 +243,7 @@ export async function chunkFile(
         metadata: {
           originalSize: fileInfo.size,
           chunkIndex,
-          totalChunks: 0, // Will be set after all chunks are processed
+          totalChunks: 0,
           symbolName: segment.metadata.symbolName,
           symbolType: segment.metadata.symbolType,
           parentSymbol: segment.metadata.parentSymbol,
@@ -224,11 +262,121 @@ export async function chunkFile(
     chunk.metadata.totalChunks = chunks.length;
   }
 
-  return chunks;
+  return {
+    filePath: fileInfo.relativePath,
+    success: true,
+    chunks,
+    warnings,
+  };
+}
+
+/**
+ * Chunk multiple files with aggregated result reporting.
+ *
+ * Returns a BatchChunkResult with:
+ * - Per-file results (success/failure for each)
+ * - Aggregate counts (successCount, failureCount, totalChunks)
+ * - All warnings and errors collected
+ *
+ * @param files - Array of file info objects
+ * @param config - Optional chunker configuration
+ * @param options - Callbacks for progress (onChunk only)
+ * @returns BatchChunkResult with aggregated statistics
+ */
+export async function chunkFilesWithResult(
+  files: FileInfo[],
+  config: ChunkerConfig = {},
+  options: Pick<ChunkOptions, 'onChunk'> = {}
+): Promise<BatchChunkResult> {
+  const fileResults: FileChunkResult[] = [];
+  let successCount = 0;
+  let failureCount = 0;
+  const allWarnings: string[] = [];
+  const allErrors: string[] = [];
+
+  for (const file of files) {
+    const result = await chunkFileWithResult(file, config, options);
+    fileResults.push(result);
+
+    if (result.success) {
+      successCount++;
+    } else {
+      failureCount++;
+      if (result.error) {
+        allErrors.push(`${result.filePath}: ${result.error}`);
+      }
+    }
+
+    // Prefix warnings with file path for context
+    for (const warning of result.warnings) {
+      allWarnings.push(`${result.filePath}: ${warning}`);
+    }
+  }
+
+  return {
+    files: fileResults,
+    successCount,
+    failureCount,
+    totalChunks: fileResults.reduce((sum, r) => sum + r.chunks.length, 0),
+    warnings: allWarnings,
+    errors: allErrors,
+  };
+}
+
+// ============================================================================
+// Legacy Functions (Backward Compatible)
+// ============================================================================
+
+/**
+ * Chunk a single file into segments ready for embedding.
+ *
+ * This is the backward-compatible entry point. It delegates to
+ * chunkFileWithResult() and converts the result to the legacy format
+ * (ChunkResult[] with callback-based error reporting).
+ *
+ * For new code, prefer chunkFileWithResult() which provides explicit
+ * success/failure information.
+ *
+ * @param fileInfo - File metadata from discovery
+ * @param config - Optional chunker configuration
+ * @param options - Callbacks for progress/errors
+ * @returns Array of chunks ready for embedding
+ */
+export async function chunkFile(
+  fileInfo: FileInfo,
+  config: ChunkerConfig = {},
+  options: ChunkOptions = {}
+): Promise<ChunkResult[]> {
+  const result = await chunkFileWithResult(fileInfo, config, { onChunk: options.onChunk });
+
+  // Fire legacy callbacks based on result
+  if (!result.success && result.error) {
+    options.onError?.(new Error(result.error), result.filePath);
+  }
+
+  // Convert skipReason to warning for large files (legacy behavior)
+  if (result.skipReason === 'too_large' && result.error) {
+    options.onWarning?.(result.error, result.filePath);
+  }
+
+  // Forward any warnings
+  for (const warning of result.warnings) {
+    options.onWarning?.(warning, result.filePath);
+  }
+
+  return result.chunks;
 }
 
 /**
  * Chunk multiple files in batch.
+ *
+ * This is the backward-compatible batch function. It delegates to
+ * chunkFilesWithResult() and converts the result to the legacy format.
+ *
+ * For new code, prefer chunkFilesWithResult() which provides:
+ * - Per-file success/failure information
+ * - Aggregate statistics
+ * - All errors and warnings collected
  *
  * @param files - Array of file info objects
  * @param config - Optional chunker configuration
@@ -251,32 +399,48 @@ export async function chunkFiles(
 }
 
 /**
- * Extract segments from file content based on type.
+ * Result of segment extraction with error handling.
  */
-function extractSegments(content: string, fileInfo: FileInfo): ExtractedSegment[] {
-  // Config files → treat as single segment
+interface ExtractionResultWithError {
+  segments: ExtractedSegment[];
+  error?: string;
+}
+
+/**
+ * Extract segments from file content based on type.
+ *
+ * Wraps extractor calls in try-catch to capture parse errors gracefully
+ * instead of crashing the entire chunking pipeline.
+ */
+function extractSegments(content: string, fileInfo: FileInfo): ExtractionResultWithError {
+  // Config files → treat as single segment (no parsing, can't fail)
   if (fileInfo.type === 'config') {
-    return [{
-      content,
-      contentType: 'config',
-      startLine: 1,
-      endLine: content.split('\n').length,
-      metadata: {},
-    }];
+    return {
+      segments: [{
+        content,
+        contentType: 'config',
+        startLine: 1,
+        endLine: content.split('\n').length,
+        metadata: {},
+      }],
+    };
   }
 
-  // Markdown files → use markdown extractor
-  if (isMarkdown(fileInfo.extension)) {
-    return extractMarkdownSegments(content).segments;
-  }
+  try {
+    // Markdown files → use markdown extractor
+    if (isMarkdown(fileInfo.extension)) {
+      return { segments: extractMarkdownSegments(content).segments };
+    }
 
-  // Code files with AST support → use code extractor
-  if (isLanguageSupported(fileInfo.language)) {
-    return extractCodeSegments(content, fileInfo.language).segments;
+    // Code files (supported or fallback) → use code extractor
+    return { segments: extractCodeSegments(content, fileInfo.language).segments };
+  } catch (error) {
+    // Parsing failed - return error instead of crashing
+    return {
+      segments: [],
+      error: (error as Error).message,
+    };
   }
-
-  // Unsupported code files → use fallback code extraction
-  return extractCodeSegments(content, fileInfo.language).segments;
 }
 
 /**

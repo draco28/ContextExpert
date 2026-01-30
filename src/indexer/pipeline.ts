@@ -19,10 +19,10 @@ import { randomUUID } from 'node:crypto';
 import type { EmbeddingProvider } from '@contextaisdk/rag';
 
 import { scanDirectory, type ScanResult } from './scanner.js';
-import { chunkFiles, type ChunkerConfig } from './chunker/index.js';
+import { chunkFilesWithResult, type ChunkerConfig } from './chunker/index.js';
 import { embedChunks } from './embedder/index.js';
 import type { FileInfo } from './types.js';
-import type { ChunkResult } from './chunker/types.js';
+import type { ChunkResult, BatchChunkResult } from './chunker/types.js';
 import type { EmbeddedChunk } from './embedder/types.js';
 import { getDatabase } from '../database/index.js';
 import type { IndexingStage, StageStats, IndexPipelineResult } from '../cli/utils/progress.js';
@@ -162,12 +162,13 @@ export async function runIndexPipeline(
   const chunkStartTime = performance.now();
   onStageStart?.('chunking', scanResult.files.length);
 
-  let chunksCreated: ChunkResult[] = [];
+  let chunkResult: BatchChunkResult;
   let filesChunked = 0;
   let lastChunkedFile = '';
 
   try {
-    chunksCreated = await chunkFiles(
+    // Use structured result API for better error tracking
+    chunkResult = await chunkFilesWithResult(
       scanResult.files,
       {
         ...chunkerConfig,
@@ -175,30 +176,47 @@ export async function runIndexPipeline(
       },
       {
         onChunk: (chunk: ChunkResult) => {
-          // Track which file we're on
+          // Track which file we're on for progress
           if (chunk.file_path !== lastChunkedFile) {
             filesChunked++;
             lastChunkedFile = chunk.file_path;
             onProgress?.('chunking', filesChunked, scanResult.files.length, chunk.file_path);
           }
         },
-        onWarning: (message: string, filePath: string) => {
-          warnings.push(`${filePath}: ${message}`);
-          onWarning?.(message, filePath);
-        },
-        onError: (error: Error, filePath: string) => {
-          errors.push(`${filePath}: ${error.message}`);
-          onError?.(error, filePath);
-        },
       }
     );
+
+    // Aggregate warnings and errors from structured result
+    warnings.push(...chunkResult.warnings);
+    errors.push(...chunkResult.errors);
+
+    // Fire callbacks for warnings/errors (for real-time feedback)
+    for (const warning of chunkResult.warnings) {
+      const [filePath, ...rest] = warning.split(': ');
+      onWarning?.(rest.join(': '), filePath);
+    }
+    for (const error of chunkResult.errors) {
+      const [filePath, ...rest] = error.split(': ');
+      onError?.(new Error(rest.join(': ')), filePath);
+    }
   } catch (error) {
     // Fatal chunking error
     throw error;
   }
 
+  // Extract chunks from structured result
+  const chunksCreated = chunkResult.files.flatMap(f => f.chunks);
+
   const chunkDuration = performance.now() - chunkStartTime;
   stageDurations.chunking = Math.round(chunkDuration);
+
+  // Build skip reason summary for details
+  const skipSummary: Record<string, number> = {};
+  for (const file of chunkResult.files) {
+    if (file.skipReason) {
+      skipSummary[file.skipReason] = (skipSummary[file.skipReason] ?? 0) + 1;
+    }
+  }
 
   onStageComplete?.('chunking', {
     stage: 'chunking',
@@ -206,7 +224,9 @@ export async function runIndexPipeline(
     total: chunksCreated.length,
     durationMs: Math.round(chunkDuration),
     details: {
-      filesProcessed: filesChunked,
+      filesProcessed: chunkResult.successCount,
+      filesFailed: chunkResult.failureCount,
+      skipReasons: Object.keys(skipSummary).length > 0 ? skipSummary : undefined,
     },
   });
 

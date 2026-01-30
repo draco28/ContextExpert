@@ -16,6 +16,7 @@ import type Database from 'better-sqlite3';
 import { getDb, getDbPath } from './connection.js';
 import { embeddingToBlob, generateId } from './schema.js';
 import type { Project } from './schema.js';
+import { ProjectRowSchema, validateRow, validateRows } from './validation.js';
 import type { FileType, Language } from '../indexer/types.js';
 import type { ContentType } from '../indexer/chunker/types.js';
 import { getVectorStoreManager, getBM25StoreManager } from '../search/index.js';
@@ -195,9 +196,14 @@ export class DatabaseOperations {
 
   /**
    * Get a project by name.
+   *
+   * Uses Zod validation to ensure the database row matches the expected schema.
+   * Throws SchemaValidationError if the row has unexpected shape.
    */
   getProjectByName(name: string): Project | undefined {
-    return this.db.prepare('SELECT * FROM projects WHERE name = ?').get(name) as Project | undefined;
+    const row = this.db.prepare('SELECT * FROM projects WHERE name = ?').get(name);
+    if (!row) return undefined;
+    return validateRow(ProjectRowSchema, row, `projects.name=${name}`);
   }
 
   /**
@@ -245,23 +251,34 @@ export class DatabaseOperations {
 
   /**
    * Get a project by ID.
+   *
+   * Uses Zod validation to ensure the database row matches the expected schema.
    */
   getProjectById(id: string): Project | undefined {
-    return this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as Project | undefined;
+    const row = this.db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+    if (!row) return undefined;
+    return validateRow(ProjectRowSchema, row, `projects.id=${id}`);
   }
 
   /**
    * Get a project by path.
+   *
+   * Uses Zod validation to ensure the database row matches the expected schema.
    */
   getProjectByPath(path: string): Project | undefined {
-    return this.db.prepare('SELECT * FROM projects WHERE path = ?').get(path) as Project | undefined;
+    const row = this.db.prepare('SELECT * FROM projects WHERE path = ?').get(path);
+    if (!row) return undefined;
+    return validateRow(ProjectRowSchema, row, `projects.path=${path}`);
   }
 
   /**
    * Get all projects.
+   *
+   * Uses Zod validation to ensure all database rows match the expected schema.
    */
   getAllProjects(): Project[] {
-    return this.db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as Project[];
+    const rows = this.db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all();
+    return validateRows(ProjectRowSchema, rows, 'projects');
   }
 
   /**

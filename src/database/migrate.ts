@@ -7,6 +7,51 @@
 
 import { getDb } from './connection.js';
 
+// ============================================================================
+// Migration State Tracking (Ticket #52)
+// ============================================================================
+
+/**
+ * Process-level migration state.
+ *
+ * Why module-level state?
+ * - Node.js caches modules, so this persists across all imports
+ * - Prevents redundant database calls when multiple commands call runMigrations()
+ * - Can be reset for testing via resetMigrationState()
+ */
+interface MigrationState {
+  /** Whether migrations have been checked/applied this process */
+  initialized: boolean;
+  /** Names of applied migrations (from _migrations table) */
+  applied: Set<string>;
+  /** Timestamp when state was initialized */
+  lastCheck: number;
+}
+
+/** Module-level state - null until first runMigrations() call */
+let migrationState: MigrationState | null = null;
+
+// ============================================================================
+// Migration Result Type (Ticket #52)
+// ============================================================================
+
+/**
+ * Result of running migrations.
+ *
+ * Provides explicit success/failure information instead of throwing.
+ * This allows callers to handle failures gracefully.
+ */
+export interface MigrationResult {
+  /** Names of migrations that were successfully applied */
+  applied: string[];
+  /** Migrations that failed with their error messages */
+  failed: Array<{ name: string; error: string }>;
+}
+
+// ============================================================================
+// Embedded Migrations
+// ============================================================================
+
 // Embedded migrations (bundler-friendly approach)
 // SQL files are embedded as strings to avoid file system dependencies in bundled output
 const MIGRATIONS: Array<{ name: string; sql: string }> = [
@@ -92,19 +137,35 @@ CREATE INDEX IF NOT EXISTS idx_projects_embedding_model ON projects(embedding_mo
 /**
  * Run all pending migrations.
  *
- * @returns Array of migration names that were applied
+ * Returns a MigrationResult with explicit success/failure information.
+ * Failed migrations do not stop subsequent migrations from being attempted.
+ *
+ * @returns MigrationResult with applied and failed arrays
  *
  * @example
  * ```ts
  * import { runMigrations } from './database/migrate.js';
  *
- * const applied = runMigrations();
- * console.log(`Applied ${applied.length} migrations`);
+ * const result = runMigrations();
+ * if (result.failed.length > 0) {
+ *   console.error(`${result.failed.length} migrations failed`);
+ *   for (const { name, error } of result.failed) {
+ *     console.error(`  - ${name}: ${error}`);
+ *   }
+ * }
+ * console.log(`Applied ${result.applied.length} migrations`);
  * ```
  */
-export function runMigrations(): string[] {
+export function runMigrations(): MigrationResult {
+  // Fast path: already initialized this process
+  // This prevents redundant database calls when multiple commands invoke runMigrations()
+  if (migrationState?.initialized) {
+    return { applied: [], failed: [] };
+  }
+
   const db = getDb();
   const applied: string[] = [];
+  const failed: Array<{ name: string; error: string }> = [];
 
   // Ensure migrations table exists (bootstrap)
   db.exec(`
@@ -115,8 +176,8 @@ export function runMigrations(): string[] {
     )
   `);
 
-  // Get list of already-applied migrations
-  const appliedMigrations = new Set(
+  // Get list of already-applied migrations from database
+  const appliedMigrations = new Set<string>(
     db
       .prepare('SELECT name FROM _migrations')
       .all()
@@ -129,16 +190,35 @@ export function runMigrations(): string[] {
       continue; // Already applied
     }
 
-    // Run migration in transaction for atomicity
-    db.transaction(() => {
-      db.exec(migration.sql);
-      db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(migration.name);
-    })();
+    try {
+      // Run migration in transaction for atomicity
+      db.transaction(() => {
+        db.exec(migration.sql);
+        db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(migration.name);
+      })();
 
-    applied.push(migration.name);
+      applied.push(migration.name);
+      appliedMigrations.add(migration.name); // Track newly applied
+    } catch (error) {
+      // Capture error but continue to next migration
+      failed.push({
+        name: migration.name,
+        error: (error as Error).message,
+      });
+    }
   }
 
-  return applied;
+  // Only cache state if no failures
+  // This ensures retry on next CLI invocation
+  if (failed.length === 0) {
+    migrationState = {
+      initialized: true,
+      applied: appliedMigrations,
+      lastCheck: Date.now(),
+    };
+  }
+
+  return { applied, failed };
 }
 
 /**
@@ -195,4 +275,52 @@ export function getAppliedMigrations(): Array<{
   return db
     .prepare('SELECT name, applied_at FROM _migrations ORDER BY id')
     .all() as Array<{ name: string; applied_at: string }>;
+}
+
+// ============================================================================
+// State Management Utilities (Ticket #52)
+// ============================================================================
+
+/**
+ * Reset migration state for testing.
+ *
+ * Call this to force the next runMigrations() to check the database again.
+ * Useful in tests that need to verify migration behavior.
+ *
+ * @example
+ * ```ts
+ * beforeEach(() => {
+ *   resetMigrationState();
+ * });
+ * ```
+ */
+export function resetMigrationState(): void {
+  migrationState = null;
+}
+
+/**
+ * Check if migrations have been initialized this process.
+ *
+ * @returns true if runMigrations() has been called successfully
+ *
+ * @example
+ * ```ts
+ * if (!isMigrationInitialized()) {
+ *   runMigrations();
+ * }
+ * ```
+ */
+export function isMigrationInitialized(): boolean {
+  return migrationState?.initialized ?? false;
+}
+
+/**
+ * Get count of available migrations.
+ *
+ * Useful for status commands to show migration info.
+ *
+ * @returns Total number of migrations defined in the system
+ */
+export function getMigrationCount(): number {
+  return MIGRATIONS.length;
 }

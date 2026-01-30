@@ -19,8 +19,7 @@
  */
 
 import { Command } from 'commander';
-import { resolve, basename } from 'node:path';
-import { existsSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
 import chalk from 'chalk';
 
 import type { CommandContext } from '../types.js';
@@ -33,6 +32,7 @@ import { createEmbeddingProvider } from '../../indexer/embedder/index.js';
 import { loadConfig, DEFAULT_CONFIG } from '../../config/index.js';
 import { runMigrations, getDatabase } from '../../database/index.js';
 import { CLIError } from '../../errors/index.js';
+import { validateProjectPath } from '../../utils/path-validation.js';
 
 /**
  * Command-specific options.
@@ -61,22 +61,17 @@ export function createIndexCommand(
     .action(async (path: string, cmdOptions: IndexCommandOptions) => {
       const ctx = getContext();
 
-      // Resolve and validate path
-      const projectPath = resolve(path);
-
-      if (!existsSync(projectPath)) {
-        throw new CLIError(
-          `Path does not exist: ${projectPath}`,
-          'Check the path and try again'
-        );
+      // Validate and normalize path with comprehensive checks
+      const validation = validateProjectPath(path);
+      if (!validation.valid) {
+        throw new CLIError(validation.error, validation.hint);
       }
 
-      const stat = statSync(projectPath);
-      if (!stat.isDirectory()) {
-        throw new CLIError(
-          `Path is not a directory: ${projectPath}`,
-          'ctx index requires a directory path, not a file'
-        );
+      const projectPath = validation.normalizedPath;
+
+      // Show any validation warnings
+      for (const warning of validation.warnings) {
+        ctx.log(chalk.yellow(`Warning: ${warning}`));
       }
 
       // Determine project name

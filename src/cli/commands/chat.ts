@@ -32,6 +32,7 @@ import {
 import { getDb, runMigrations } from '../../database/index.js';
 import { loadConfig, type Config } from '../../config/loader.js';
 import { createRAGEngine, type ContextExpertRAGEngine } from '../../agent/rag-engine.js';
+import { RAGEngineError, RAGErrorCodes } from '../../agent/types.js';
 import { formatCitations } from '../../agent/citations.js';
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
@@ -216,19 +217,50 @@ const REPL_COMMANDS: REPLCommand[] = [
 
       // Create RAG engine first, then update state atomically
       // (If createRAGEngine throws, state remains unchanged)
-      const newRagEngine = await createRAGEngine(
-        state.config,
-        String(project.id)
-      );
-      state.currentProject = project;
-      state.ragEngine = newRagEngine;
-      updatePrompt(state);
-
-      ctx.log(chalk.blue(`Focused on: ${project.name}`));
-      if (!existsSync(project.path)) {
-        ctx.log(
-          chalk.yellow(`Warning: Project path no longer exists: ${project.path}`)
+      try {
+        const newRagEngine = await createRAGEngine(
+          state.config,
+          String(project.id)
         );
+        state.currentProject = project;
+        state.ragEngine = newRagEngine;
+        updatePrompt(state);
+
+        ctx.log(chalk.blue(`Focused on: ${project.name}`));
+        if (!existsSync(project.path)) {
+          ctx.log(
+            chalk.yellow(`Warning: Project path no longer exists: ${project.path}`)
+          );
+        }
+      } catch (error) {
+        // Provide user-friendly error messages based on error type
+        if (error instanceof RAGEngineError) {
+          ctx.log(chalk.red(`Failed to focus on ${project.name}:`));
+          ctx.log(chalk.red(`  ${error.message}`));
+
+          // Add actionable hints based on error code
+          switch (error.code) {
+            case RAGErrorCodes.EMBEDDING_UNAVAILABLE:
+              ctx.log(chalk.dim('Hint: Check your API keys with: ctx config get embedding.provider'));
+              ctx.log(chalk.dim('      Run: ctx config set embedding.provider ollama  for local embeddings'));
+              break;
+            case RAGErrorCodes.PROJECT_NOT_INDEXED:
+              ctx.log(chalk.dim(`Hint: Run: ctx index "${project.path}"  to index this project`));
+              break;
+            case RAGErrorCodes.CONFIG_ERROR:
+              ctx.log(chalk.dim('Hint: Check your config with: ctx config list'));
+              ctx.log(chalk.dim('      Reset to defaults with: ctx config reset'));
+              break;
+            default:
+              ctx.log(chalk.dim('Hint: Try /unfocus to clear state, then /focus again'));
+          }
+        } else {
+          // Unknown error - still show something useful
+          ctx.log(chalk.red(`Failed to focus on ${project.name}:`));
+          ctx.log(chalk.red(`  ${error instanceof Error ? error.message : String(error)}`));
+          ctx.log(chalk.dim('Hint: Try /unfocus to clear state, then /focus again'));
+        }
+        ctx.debug(`Focus error details: ${error}`);
       }
       return true;
     },

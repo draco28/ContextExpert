@@ -462,7 +462,7 @@ hello('world');
 
     expect(chunks.length).toBe(0);
     expect(warnings.length).toBe(1);
-    expect(warnings[0]).toContain('Skipping large file');
+    expect(warnings[0]).toContain('File too large');
   });
 
   it('should preserve line numbers through chunking', async () => {

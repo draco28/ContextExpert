@@ -36,3 +36,16 @@ export {
   _clearEnvCache,
 } from './env.js';
 export type { EnvVars } from './env.js';
+
+// Startup validation
+export {
+  validateStartupConfig,
+  printStartupValidation,
+  getValidationOptionsForCommand,
+  COMMANDS_REQUIRING_LLM,
+  COMMANDS_REQUIRING_EMBEDDING,
+} from './startup-validation.js';
+export type {
+  StartupValidationResult,
+  StartupValidationOptions,
+} from './startup-validation.js';

@@ -14,3 +14,10 @@ export {
 
 // Safe JSON parsing
 export { safeJsonParse } from './json.js';
+
+// Path validation
+export {
+  validateProjectPath,
+  type PathValidationResult,
+  type PathValidationOptions,
+} from './path-validation.js';
