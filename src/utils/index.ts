@@ -21,3 +21,10 @@ export {
   type PathValidationResult,
   type PathValidationOptions,
 } from './path-validation.js';
+
+// Logging utilities for library code
+export {
+  type Logger,
+  consoleLogger,
+  silentLogger,
+} from './logger.js';

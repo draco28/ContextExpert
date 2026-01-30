@@ -17,6 +17,7 @@ export type {
 } from '@contextaisdk/rag';
 
 import type { ChunkResult } from '../chunker/types.js';
+import type { Logger } from '../../utils/index.js';
 
 /**
  * Embedding provider configuration.
@@ -69,6 +70,13 @@ export interface EmbedderOptions {
   batchSize?: number;
 
   /**
+   * Timeout in milliseconds for embedding operations.
+   * If a batch takes longer than this, it will be aborted.
+   * @default 120000 (2 minutes)
+   */
+  timeout?: number;
+
+  /**
    * Progress callback, fired after each batch completes.
    * @param processed - Number of chunks embedded so far
    * @param total - Total number of chunks to embed
@@ -104,6 +112,12 @@ export interface ProviderOptions {
    * HuggingFace models can be large (~1.3GB for BGE-large).
    */
   onProgress?: (progress: ModelLoadProgress) => void;
+
+  /**
+   * Logger for warnings (e.g., provider availability check failures).
+   * Defaults to console logger if not provided.
+   */
+  logger?: Logger;
 }
 
 /**

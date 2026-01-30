@@ -71,6 +71,11 @@ function createContext(options: GlobalOptions): CommandContext {
         console.log(chalk.dim(`[debug] ${message}`));
       }
     },
+    warn: (message: string) => {
+      if (!options.json) {
+        console.warn(chalk.yellow(`Warning: ${message}`));
+      }
+    },
     error: (message: string) => {
       if (options.json) {
         console.error(JSON.stringify({ error: message }));

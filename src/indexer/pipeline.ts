@@ -52,6 +52,9 @@ export interface IndexPipelineOptions {
   /** Optional chunker configuration overrides */
   chunkerConfig?: ChunkerConfig;
 
+  /** Timeout in milliseconds for embedding operations */
+  embeddingTimeout?: number;
+
   // Progress callbacks
   onStageStart?: (stage: IndexingStage, total: number) => void;
   onProgress?: (stage: IndexingStage, processed: number, total: number, currentFile?: string) => void;
@@ -96,6 +99,7 @@ export async function runIndexPipeline(
     projectName,
     embeddingProvider,
     chunkerConfig,
+    embeddingTimeout,
     onStageStart,
     onProgress,
     onStageComplete,
@@ -241,6 +245,7 @@ export async function runIndexPipeline(
   try {
     embeddedChunks = await embedChunks(chunksCreated, embeddingProvider, {
       batchSize: 32,
+      timeout: embeddingTimeout,
       onProgress: (processed: number, total: number) => {
         onProgress?.('embedding', processed, total);
       },

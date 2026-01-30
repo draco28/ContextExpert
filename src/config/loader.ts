@@ -69,7 +69,7 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
  */
 const KNOWN_CONFIG_KEYS: Record<string, string[]> = {
   root: ['default_model', 'default_provider', 'embedding', 'search'],
-  embedding: ['provider', 'model', 'fallback_provider', 'fallback_model', 'batch_size'],
+  embedding: ['provider', 'model', 'fallback_provider', 'fallback_model', 'batch_size', 'timeout_ms'],
   search: ['top_k', 'rerank'],
 };
 

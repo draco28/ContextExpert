@@ -32,6 +32,13 @@ export const EmbeddingConfigSchema = z.object({
     .max(100)
     .default(32)
     .describe('Number of texts to embed per batch (1-100, default 32)'),
+  timeout_ms: z
+    .number()
+    .int()
+    .min(1000)
+    .max(600000)
+    .default(120000)
+    .describe('Timeout in milliseconds for embedding operations (1000-600000, default 120000 = 2 minutes)'),
 });
 
 /**

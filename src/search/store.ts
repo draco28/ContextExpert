@@ -17,7 +17,7 @@ import {
   validateRows,
   type ChunkLoadRow,
 } from '../database/validation.js';
-import { safeJsonParse } from '../utils/index.js';
+import { safeJsonParse, type Logger, consoleLogger } from '../utils/index.js';
 import type { SearchServiceOptions, IndexBuildProgress } from './types.js';
 
 /** Batch size for loading chunks from SQLite (memory efficiency) */
@@ -66,11 +66,13 @@ export class VectorStoreManager {
    *
    * @param options - Store configuration including projectId and dimensions
    * @param onProgress - Optional callback for progress updates during loading
+   * @param logger - Optional logger for warnings (defaults to console)
    * @returns The initialized vector store
    */
   async getStore(
     options: SearchServiceOptions,
-    onProgress?: (progress: IndexBuildProgress) => void
+    onProgress?: (progress: IndexBuildProgress) => void,
+    logger: Logger = consoleLogger
   ): Promise<InMemoryVectorStore> {
     const { projectId } = options;
 
@@ -85,7 +87,7 @@ export class VectorStoreManager {
     }
 
     // Build new store
-    const buildPromise = this.buildStore(options, onProgress);
+    const buildPromise = this.buildStore(options, onProgress, logger);
     this.buildingStores.set(projectId, buildPromise);
 
     try {
@@ -104,7 +106,8 @@ export class VectorStoreManager {
    */
   private async buildStore(
     options: SearchServiceOptions,
-    onProgress?: (progress: IndexBuildProgress) => void
+    onProgress?: (progress: IndexBuildProgress) => void,
+    logger: Logger = consoleLogger
   ): Promise<InMemoryVectorStore> {
     const {
       projectId,
@@ -197,7 +200,7 @@ export class VectorStoreManager {
             startLine: row.start_line,
             endLine: row.end_line,
             ...safeJsonParse(row.metadata, {}, (err) => {
-              console.warn(`[VectorStore] Skipping corrupted metadata for chunk ${row.id}: ${err.message}`);
+              logger.warn(`[VectorStore] Skipping corrupted metadata for chunk ${row.id}: ${err.message}`);
             }),
           },
         };

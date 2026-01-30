@@ -64,7 +64,12 @@ import { createAssembler } from './assembler.js';
 
 import type { Config } from '../config/schema.js';
 import { createEmbeddingProvider } from '../indexer/embedder/provider.js';
-import { createFusionService, type FusionService } from '../search/index.js';
+import {
+  createFusionService,
+  type FusionService,
+  resetVectorStoreManager,
+  resetBM25StoreManager,
+} from '../search/index.js';
 import type { SearchResultWithContext } from '../search/types.js';
 import {
   RAGConfigSchema,
@@ -283,6 +288,26 @@ export class ContextExpertRAGEngine {
    */
   getProjectId(): string {
     return this.fusionService.getProjectId();
+  }
+
+  /**
+   * Dispose of resources held by the RAG engine.
+   *
+   * Cleans up:
+   * - Singleton vector store cache (frees in-memory indexes)
+   * - Singleton BM25 store cache (frees in-memory indexes)
+   *
+   * Call this when you're done using the engine to free memory.
+   * After disposal, the engine should not be used again.
+   *
+   * Note: This clears ALL cached stores, not just this project's.
+   * In a multi-project scenario, consider using selective invalidation instead.
+   */
+  dispose(): void {
+    // Clear singleton managers to free memory
+    // This releases all cached in-memory vector stores and BM25 indexes
+    resetVectorStoreManager();
+    resetBM25StoreManager();
   }
 
   /**
