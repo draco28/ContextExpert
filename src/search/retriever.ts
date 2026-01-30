@@ -9,6 +9,7 @@ import { DenseRetriever } from '@contextaisdk/rag';
 import type { EmbeddingProvider } from '@contextaisdk/rag';
 
 import { getVectorStoreManager } from './store.js';
+import { formatSearchResult } from './shared-formatting.js';
 import type {
   SearchConfig,
   SearchServiceOptions,
@@ -136,20 +137,15 @@ export class SearchService {
       filter: Object.keys(filter).length > 0 ? filter : undefined,
     });
 
-    // Convert to our result format
-    return results.map((result) => ({
-      id: result.chunk.id,
-      score: result.score,
-      content: result.chunk.content,
-      filePath: (result.chunk.metadata?.filePath as string) ?? '',
-      fileType: (result.chunk.metadata?.fileType as SearchResultWithContext['fileType']) ?? 'unknown',
-      language: (result.chunk.metadata?.language as string | null) ?? null,
-      lineRange: {
-        start: (result.chunk.metadata?.startLine as number) ?? 0,
-        end: (result.chunk.metadata?.endLine as number) ?? 0,
-      },
-      metadata: result.chunk.metadata ?? {},
-    }));
+    // Convert to our result format using shared utility
+    return results.map((result) =>
+      formatSearchResult(
+        result.chunk.id,
+        result.score,
+        result.chunk.content,
+        result.chunk.metadata
+      )
+    );
   }
 
   /**
