@@ -69,6 +69,7 @@ import type { SearchResultWithContext } from '../search/types.js';
 import {
   RAGConfigSchema,
   RAGEngineError,
+  RetrievalError,
   type RAGConfig,
   type RAGEngineOptions,
   type RAGSearchResult,
@@ -246,11 +247,10 @@ export class ContextExpertRAGEngine {
       const endTime = performance.now();
       return this.toRAGSearchResult(result, endTime - startTime);
     } catch (error) {
-      // Wrap SDK errors in our error type
-      if (error instanceof Error) {
-        throw RAGEngineError.retrievalFailed(error.message, error);
-      }
-      throw RAGEngineError.retrievalFailed(String(error));
+      // Wrap SDK errors in our error type, preserving full context
+      const originalError =
+        error instanceof Error ? error : new Error(String(error));
+      throw new RetrievalError(originalError.message, originalError);
     }
   }
 
@@ -259,12 +259,23 @@ export class ContextExpertRAGEngine {
    *
    * Call during application startup to avoid first-request latency.
    * Both the fusion service and SDK engine are warmed up.
+   *
+   * @throws {RAGEngineError} If warm-up fails (with EMBEDDING_UNAVAILABLE code)
    */
   async warmUp(): Promise<void> {
-    await Promise.all([
-      this.fusionService.ensureInitialized(),
-      this.engine.warmUp(),
-    ]);
+    try {
+      await Promise.all([
+        this.fusionService.ensureInitialized(),
+        this.engine.warmUp(),
+      ]);
+    } catch (error) {
+      const originalError =
+        error instanceof Error ? error : new Error(String(error));
+      throw RAGEngineError.embeddingUnavailable(
+        `Warm-up failed: ${originalError.message}`,
+        originalError
+      );
+    }
   }
 
   /**

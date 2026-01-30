@@ -447,7 +447,7 @@ describe('ContextExpertRAGEngine', () => {
   });
 
   describe('error handling', () => {
-    it('should wrap SDK errors in RAGEngineError', async () => {
+    it('should wrap SDK errors in RetrievalError', async () => {
       const mockEngine = createMockRAGEngineImpl();
       mockEngine.search.mockRejectedValue(new Error('SDK error'));
 
@@ -458,7 +458,81 @@ describe('ContextExpertRAGEngine', () => {
         defaultConfig
       );
 
-      await expect(engine.search('test query')).rejects.toThrow('Search failed: SDK error');
+      await expect(engine.search('test query')).rejects.toThrow(
+        'RAG retrieval failed: SDK error'
+      );
+    });
+
+    it('should handle non-Error thrown values', async () => {
+      const mockEngine = createMockRAGEngineImpl();
+      mockEngine.search.mockRejectedValue('string error'); // Non-Error throw
+
+      const fusionService = createMockFusionService();
+      const engine = new ContextExpertRAGEngine(
+        mockEngine as any,
+        fusionService,
+        defaultConfig
+      );
+
+      await expect(engine.search('test query')).rejects.toMatchObject({
+        code: 'RETRIEVAL_FAILED',
+        message: expect.stringContaining('string error'),
+      });
+    });
+
+    it('should preserve error cause chain for debugging', async () => {
+      const rootCause = new Error('connection refused');
+      const mockEngine = createMockRAGEngineImpl();
+      mockEngine.search.mockRejectedValue(rootCause);
+
+      const fusionService = createMockFusionService();
+      const engine = new ContextExpertRAGEngine(
+        mockEngine as any,
+        fusionService,
+        defaultConfig
+      );
+
+      try {
+        await engine.search('test query');
+        expect.fail('should have thrown');
+      } catch (error) {
+        expect((error as any).cause).toBe(rootCause);
+        expect((error as any).cause.message).toBe('connection refused');
+      }
+    });
+
+    it('should wrap warmUp errors in RAGEngineError', async () => {
+      const mockEngine = createMockRAGEngineImpl();
+      mockEngine.warmUp.mockRejectedValue(new Error('index not found'));
+
+      const fusionService = createMockFusionService();
+      const engine = new ContextExpertRAGEngine(
+        mockEngine as any,
+        fusionService,
+        defaultConfig
+      );
+
+      await expect(engine.warmUp()).rejects.toMatchObject({
+        code: 'EMBEDDING_UNAVAILABLE',
+        message: expect.stringContaining('Warm-up failed'),
+      });
+    });
+
+    it('should handle non-Error in warmUp', async () => {
+      const mockEngine = createMockRAGEngineImpl();
+      mockEngine.warmUp.mockRejectedValue('warmup string error');
+
+      const fusionService = createMockFusionService();
+      const engine = new ContextExpertRAGEngine(
+        mockEngine as any,
+        fusionService,
+        defaultConfig
+      );
+
+      await expect(engine.warmUp()).rejects.toMatchObject({
+        code: 'EMBEDDING_UNAVAILABLE',
+        message: expect.stringContaining('warmup string error'),
+      });
     });
   });
 });
@@ -548,5 +622,128 @@ describe('RAGEngineError', () => {
     const error = RAGEngineError.retrievalFailed('search failed', cause);
 
     expect(error.cause).toBe(cause);
+  });
+
+  it('should create assembly failed error', () => {
+    const cause = new Error('token budget exceeded');
+    const error = RAGEngineError.assemblyFailed('formatting failed', cause);
+
+    expect(error.code).toBe(RAGErrorCodes.ASSEMBLY_FAILED);
+    expect(error.message).toContain('Context assembly failed');
+    expect(error.message).toContain('formatting failed');
+    expect(error.cause).toBe(cause);
+  });
+
+  it('should create config error', () => {
+    const cause = new Error('invalid max_tokens');
+    const error = RAGEngineError.configError('validation failed', cause);
+
+    expect(error.code).toBe(RAGErrorCodes.CONFIG_ERROR);
+    expect(error.message).toContain('RAG configuration error');
+    expect(error.message).toContain('validation failed');
+    expect(error.cause).toBe(cause);
+  });
+});
+
+// ============================================================================
+// RAG Error Subtypes Tests
+// ============================================================================
+
+describe('RAG Error Subtypes', () => {
+  let RetrievalError: typeof import('../types.js').RetrievalError;
+  let AssemblyError: typeof import('../types.js').AssemblyError;
+  let FormattingError: typeof import('../types.js').FormattingError;
+  let ConfigError: typeof import('../types.js').ConfigError;
+  let RAGEngineError: typeof import('../types.js').RAGEngineError;
+  let RAGErrorCodes: typeof import('../types.js').RAGErrorCodes;
+
+  beforeEach(async () => {
+    const types = await import('../types.js');
+    RetrievalError = types.RetrievalError;
+    AssemblyError = types.AssemblyError;
+    FormattingError = types.FormattingError;
+    ConfigError = types.ConfigError;
+    RAGEngineError = types.RAGEngineError;
+    RAGErrorCodes = types.RAGErrorCodes;
+  });
+
+  describe('RetrievalError', () => {
+    it('should extend RAGEngineError', () => {
+      const error = new RetrievalError('search failed');
+      expect(error).toBeInstanceOf(RAGEngineError);
+      expect(error).toBeInstanceOf(Error);
+    });
+
+    it('should have correct error code and message', () => {
+      const error = new RetrievalError('connection timeout');
+      expect(error.code).toBe(RAGErrorCodes.RETRIEVAL_FAILED);
+      expect(error.message).toBe('RAG retrieval failed: connection timeout');
+      expect(error.name).toBe('RetrievalError');
+    });
+
+    it('should preserve cause error', () => {
+      const cause = new Error('network error');
+      const error = new RetrievalError('search failed', cause);
+      expect(error.cause).toBe(cause);
+    });
+  });
+
+  describe('AssemblyError', () => {
+    it('should extend RAGEngineError', () => {
+      const error = new AssemblyError('token budget exceeded');
+      expect(error).toBeInstanceOf(RAGEngineError);
+    });
+
+    it('should have correct error code and message', () => {
+      const error = new AssemblyError('chunk too large');
+      expect(error.code).toBe(RAGErrorCodes.ASSEMBLY_FAILED);
+      expect(error.message).toBe('Context assembly failed: chunk too large');
+      expect(error.name).toBe('AssemblyError');
+    });
+  });
+
+  describe('FormattingError', () => {
+    it('should extend RAGEngineError', () => {
+      const error = new FormattingError('invalid XML');
+      expect(error).toBeInstanceOf(RAGEngineError);
+    });
+
+    it('should have correct error code and message', () => {
+      const error = new FormattingError('citation malformed');
+      expect(error.code).toBe(RAGErrorCodes.ASSEMBLY_FAILED);
+      expect(error.message).toBe('Result formatting failed: citation malformed');
+      expect(error.name).toBe('FormattingError');
+    });
+  });
+
+  describe('ConfigError', () => {
+    it('should extend RAGEngineError', () => {
+      const error = new ConfigError('invalid config');
+      expect(error).toBeInstanceOf(RAGEngineError);
+    });
+
+    it('should have correct error code and message', () => {
+      const error = new ConfigError('max_tokens out of range');
+      expect(error.code).toBe(RAGErrorCodes.CONFIG_ERROR);
+      expect(error.message).toBe('RAG configuration error: max_tokens out of range');
+      expect(error.name).toBe('ConfigError');
+    });
+  });
+
+  describe('instanceof discrimination', () => {
+    it('should allow catching specific error types', () => {
+      const retrievalErr = new RetrievalError('search failed');
+      const assemblyErr = new AssemblyError('assembly failed');
+
+      // All are RAGEngineError
+      expect(retrievalErr).toBeInstanceOf(RAGEngineError);
+      expect(assemblyErr).toBeInstanceOf(RAGEngineError);
+
+      // But can be distinguished
+      expect(retrievalErr).toBeInstanceOf(RetrievalError);
+      expect(retrievalErr).not.toBeInstanceOf(AssemblyError);
+      expect(assemblyErr).toBeInstanceOf(AssemblyError);
+      expect(assemblyErr).not.toBeInstanceOf(RetrievalError);
+    });
   });
 });

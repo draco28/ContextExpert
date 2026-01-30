@@ -312,4 +312,70 @@ export class RAGEngineError extends Error {
       cause
     );
   }
+
+  /**
+   * Factory for configuration errors.
+   */
+  static configError(reason: string, cause?: Error): RAGEngineError {
+    return new RAGEngineError(
+      RAGErrorCodes.CONFIG_ERROR,
+      `RAG configuration error: ${reason}`,
+      cause
+    );
+  }
+}
+
+// ============================================================================
+// RAG Error Subtypes
+// ============================================================================
+
+/**
+ * Error thrown when RAG retrieval operation fails.
+ *
+ * Use this for search/query failures from the SDK or database.
+ */
+export class RetrievalError extends RAGEngineError {
+  constructor(reason: string, cause?: Error) {
+    super(RAGErrorCodes.RETRIEVAL_FAILED, `RAG retrieval failed: ${reason}`, cause);
+    this.name = 'RetrievalError';
+  }
+}
+
+/**
+ * Error thrown when context assembly fails.
+ *
+ * Use this for failures during chunk assembly, token budget calculations,
+ * or context window management.
+ */
+export class AssemblyError extends RAGEngineError {
+  constructor(reason: string, cause?: Error) {
+    super(RAGErrorCodes.ASSEMBLY_FAILED, `Context assembly failed: ${reason}`, cause);
+    this.name = 'AssemblyError';
+  }
+}
+
+/**
+ * Error thrown when result formatting fails.
+ *
+ * Use this for failures during output transformation, citation formatting,
+ * or response structuring.
+ */
+export class FormattingError extends RAGEngineError {
+  constructor(reason: string, cause?: Error) {
+    super(RAGErrorCodes.ASSEMBLY_FAILED, `Result formatting failed: ${reason}`, cause);
+    this.name = 'FormattingError';
+  }
+}
+
+/**
+ * Error thrown when RAG configuration is invalid.
+ *
+ * Use this for invalid config values, missing required fields,
+ * or schema validation failures.
+ */
+export class ConfigError extends RAGEngineError {
+  constructor(reason: string, cause?: Error) {
+    super(RAGErrorCodes.CONFIG_ERROR, `RAG configuration error: ${reason}`, cause);
+    this.name = 'ConfigError';
+  }
 }
