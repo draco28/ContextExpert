@@ -13,6 +13,7 @@
 import type { BM25Retriever } from '@contextaisdk/rag';
 
 import { getBM25StoreManager } from './bm25-store.js';
+import { formatSearchResult, matchesFilters } from './shared-formatting.js';
 import type {
   SearchConfig,
   SearchQueryOptions,
@@ -104,47 +105,17 @@ export class BM25SearchService {
     // Perform BM25 retrieval
     const results = await this.retriever!.retrieve(query, { topK });
 
-    // Convert to our result format and apply filters
-    const formatted: SearchResultWithContext[] = [];
-
-    for (const result of results) {
-      const fileType = (result.chunk.metadata?.fileType as SearchResultWithContext['fileType']) ?? 'unknown';
-      const language = (result.chunk.metadata?.language as string | null) ?? null;
-
-      // Apply filters
-      if (options.fileType && fileType !== options.fileType) {
-        continue;
-      }
-      if (options.language && language !== options.language) {
-        continue;
-      }
-      // Project filter: chunk must have projectId matching one in the filter array
-      if (options.projectIds?.length) {
-        const chunkProjectId = result.chunk.metadata?.projectId as string | undefined;
-        if (!chunkProjectId || !options.projectIds.includes(chunkProjectId)) {
-          continue;
-        }
-      }
-      if (options.minScore !== undefined && result.score < options.minScore) {
-        continue;
-      }
-
-      formatted.push({
-        id: result.chunk.id,
-        score: result.score,
-        content: result.chunk.content,
-        filePath: (result.chunk.metadata?.filePath as string) ?? '',
-        fileType,
-        language,
-        lineRange: {
-          start: (result.chunk.metadata?.startLine as number) ?? 0,
-          end: (result.chunk.metadata?.endLine as number) ?? 0,
-        },
-        metadata: result.chunk.metadata ?? {},
-      });
-    }
-
-    return formatted;
+    // Convert to our result format and apply filters using shared utilities
+    return results
+      .map((result) =>
+        formatSearchResult(
+          result.chunk.id,
+          result.score,
+          result.chunk.content,
+          result.chunk.metadata
+        )
+      )
+      .filter((result) => matchesFilters(result, options));
   }
 
   /**
