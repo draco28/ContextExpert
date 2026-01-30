@@ -541,8 +541,8 @@ async function runChatREPL(
     // Check for /focus or /f command
     const focusMatch = line.match(/^\/(focus|f)\s+(.*)$/i);
     if (focusMatch) {
-      const prefix = focusMatch[1]; // 'focus' or 'f'
-      const partial = focusMatch[2].toLowerCase();
+      const prefix = focusMatch[1] ?? 'focus'; // 'focus' or 'f'
+      const partial = (focusMatch[2] ?? '').toLowerCase();
       const projectNames = getAllProjectNames();
       const matches = projectNames
         .filter((name) => name.toLowerCase().startsWith(partial))
