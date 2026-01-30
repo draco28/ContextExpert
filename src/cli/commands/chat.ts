@@ -172,12 +172,14 @@ const REPL_COMMANDS: REPLCommand[] = [
         return true;
       }
 
-      // Update state
-      state.currentProject = project;
-      state.ragEngine = await createRAGEngine(
+      // Create RAG engine first, then update state atomically
+      // (If createRAGEngine throws, state remains unchanged)
+      const newRagEngine = await createRAGEngine(
         state.config,
         String(project.id)
       );
+      state.currentProject = project;
+      state.ragEngine = newRagEngine;
 
       ctx.log(chalk.blue(`Focused on: ${project.name}`));
       if (!existsSync(project.path)) {
