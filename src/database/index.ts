@@ -28,6 +28,8 @@ export {
   resetMigrationState,
   isMigrationInitialized,
   getMigrationCount,
+  // Result type (Ticket #52)
+  type MigrationResult,
 } from './migrate.js';
 
 // Schema types
@@ -45,14 +47,19 @@ export { generateId, embeddingToBlob, blobToEmbedding } from './schema.js';
 
 // Validation schemas and utilities (Ticket #51)
 export {
-  // Schemas
+  // Full row schemas
   ProjectRowSchema,
   ChunkRowSchema,
   FileHashRowSchema,
+  // Partial schemas for store loading
+  ChunkLoadRowSchema,
+  ChunkLoadNoEmbeddingSchema,
   // Types
   type ProjectRow,
   type ChunkRow,
   type FileHashRow,
+  type ChunkLoadRow,
+  type ChunkLoadNoEmbeddingRow,
   // Error class
   SchemaValidationError,
   // Validation functions

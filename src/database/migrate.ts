@@ -32,6 +32,23 @@ interface MigrationState {
 let migrationState: MigrationState | null = null;
 
 // ============================================================================
+// Migration Result Type (Ticket #52)
+// ============================================================================
+
+/**
+ * Result of running migrations.
+ *
+ * Provides explicit success/failure information instead of throwing.
+ * This allows callers to handle failures gracefully.
+ */
+export interface MigrationResult {
+  /** Names of migrations that were successfully applied */
+  applied: string[];
+  /** Migrations that failed with their error messages */
+  failed: Array<{ name: string; error: string }>;
+}
+
+// ============================================================================
 // Embedded Migrations
 // ============================================================================
 
@@ -120,25 +137,35 @@ CREATE INDEX IF NOT EXISTS idx_projects_embedding_model ON projects(embedding_mo
 /**
  * Run all pending migrations.
  *
- * @returns Array of migration names that were applied
+ * Returns a MigrationResult with explicit success/failure information.
+ * Failed migrations do not stop subsequent migrations from being attempted.
+ *
+ * @returns MigrationResult with applied and failed arrays
  *
  * @example
  * ```ts
  * import { runMigrations } from './database/migrate.js';
  *
- * const applied = runMigrations();
- * console.log(`Applied ${applied.length} migrations`);
+ * const result = runMigrations();
+ * if (result.failed.length > 0) {
+ *   console.error(`${result.failed.length} migrations failed`);
+ *   for (const { name, error } of result.failed) {
+ *     console.error(`  - ${name}: ${error}`);
+ *   }
+ * }
+ * console.log(`Applied ${result.applied.length} migrations`);
  * ```
  */
-export function runMigrations(): string[] {
+export function runMigrations(): MigrationResult {
   // Fast path: already initialized this process
   // This prevents redundant database calls when multiple commands invoke runMigrations()
   if (migrationState?.initialized) {
-    return [];
+    return { applied: [], failed: [] };
   }
 
   const db = getDb();
   const applied: string[] = [];
+  const failed: Array<{ name: string; error: string }> = [];
 
   // Ensure migrations table exists (bootstrap)
   db.exec(`
@@ -150,7 +177,7 @@ export function runMigrations(): string[] {
   `);
 
   // Get list of already-applied migrations from database
-  const appliedMigrations = new Set(
+  const appliedMigrations = new Set<string>(
     db
       .prepare('SELECT name FROM _migrations')
       .all()
@@ -163,24 +190,35 @@ export function runMigrations(): string[] {
       continue; // Already applied
     }
 
-    // Run migration in transaction for atomicity
-    db.transaction(() => {
-      db.exec(migration.sql);
-      db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(migration.name);
-    })();
+    try {
+      // Run migration in transaction for atomicity
+      db.transaction(() => {
+        db.exec(migration.sql);
+        db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(migration.name);
+      })();
 
-    applied.push(migration.name);
-    appliedMigrations.add(migration.name); // Track newly applied
+      applied.push(migration.name);
+      appliedMigrations.add(migration.name); // Track newly applied
+    } catch (error) {
+      // Capture error but continue to next migration
+      failed.push({
+        name: migration.name,
+        error: (error as Error).message,
+      });
+    }
   }
 
-  // Cache state for future calls in this process
-  migrationState = {
-    initialized: true,
-    applied: appliedMigrations,
-    lastCheck: Date.now(),
-  };
+  // Only cache state if no failures
+  // This ensures retry on next CLI invocation
+  if (failed.length === 0) {
+    migrationState = {
+      initialized: true,
+      applied: appliedMigrations,
+      lastCheck: Date.now(),
+    };
+  }
 
-  return applied;
+  return { applied, failed };
 }
 
 /**

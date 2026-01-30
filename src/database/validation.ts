@@ -81,6 +81,49 @@ export const ChunkRowSchema = z.object({
 /** Type inferred from ChunkRowSchema (should match Chunk interface) */
 export type ChunkRow = z.infer<typeof ChunkRowSchema>;
 
+/**
+ * Partial schema for chunk rows loaded in VectorStoreManager.
+ *
+ * This matches the SELECT subset used when loading chunks for vector search:
+ * - Includes embedding (Buffer)
+ * - Excludes project_id, created_at (not needed at load time)
+ */
+export const ChunkLoadRowSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  embedding: z.instanceof(Buffer),
+  file_path: z.string(),
+  file_type: z.string().nullable(),
+  language: z.string().nullable(),
+  start_line: z.number().int().nullable(),
+  end_line: z.number().int().nullable(),
+  metadata: z.string().nullable(),
+});
+
+/** Type inferred from ChunkLoadRowSchema */
+export type ChunkLoadRow = z.infer<typeof ChunkLoadRowSchema>;
+
+/**
+ * Partial schema for chunk rows loaded in BM25StoreManager.
+ *
+ * BM25 only needs text content for term matching, no embeddings.
+ * - Excludes embedding (not needed for BM25)
+ * - Excludes project_id, created_at (not needed at load time)
+ */
+export const ChunkLoadNoEmbeddingSchema = z.object({
+  id: z.string(),
+  content: z.string(),
+  file_path: z.string(),
+  file_type: z.string().nullable(),
+  language: z.string().nullable(),
+  start_line: z.number().int().nullable(),
+  end_line: z.number().int().nullable(),
+  metadata: z.string().nullable(),
+});
+
+/** Type inferred from ChunkLoadNoEmbeddingSchema */
+export type ChunkLoadNoEmbeddingRow = z.infer<typeof ChunkLoadNoEmbeddingSchema>;
+
 // ============================================================================
 // FileHash Schema
 // ============================================================================

@@ -17,6 +17,11 @@ import type { Chunk, BM25Document } from '@contextaisdk/rag';
 import type Database from 'better-sqlite3';
 
 import { getDb } from '../database/connection.js';
+import {
+  ChunkLoadNoEmbeddingSchema,
+  validateRows,
+  type ChunkLoadNoEmbeddingRow,
+} from '../database/validation.js';
 import { safeJsonParse } from '../utils/index.js';
 import type { BM25Config, IndexBuildProgress } from './types.js';
 
@@ -37,20 +42,6 @@ export interface BM25StoreOptions {
   projectId: string;
   /** BM25 configuration options */
   bm25Config?: BM25Config;
-}
-
-/**
- * Row shape from SQLite chunks table (no embedding needed for BM25).
- */
-interface ChunkRow {
-  id: string;
-  content: string;
-  file_path: string;
-  file_type: string | null;
-  language: string | null;
-  start_line: number | null;
-  end_line: number | null;
-  metadata: string | null;
 }
 
 /**
@@ -187,7 +178,12 @@ export class BM25StoreManager {
         total: totalChunks,
       });
 
-      const batch = stmt.all(projectId, LOAD_BATCH_SIZE, offset) as ChunkRow[];
+      const rawBatch = stmt.all(projectId, LOAD_BATCH_SIZE, offset);
+      const batch: ChunkLoadNoEmbeddingRow[] = validateRows(
+        ChunkLoadNoEmbeddingSchema,
+        rawBatch,
+        `chunks.project_id=${projectId}`
+      );
 
       if (batch.length === 0) break;
 

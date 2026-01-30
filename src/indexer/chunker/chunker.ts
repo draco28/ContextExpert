@@ -138,15 +138,33 @@ export async function chunkFileWithResult(
   }
 
   // Extract segments based on file type
-  const segments = extractSegments(content, fileInfo);
+  const { segments, error: extractError } = extractSegments(content, fileInfo);
+
+  // Handle extraction/parsing failures
+  if (extractError) {
+    return {
+      filePath: fileInfo.relativePath,
+      success: false,
+      chunks: [],
+      skipReason: 'parse_error',
+      error: `Extraction failed: ${extractError}`,
+      warnings,
+    };
+  }
+
+  // Warn if no segments were extracted from a non-empty file
+  if (segments.length === 0) {
+    warnings.push('No extractable segments found');
+  }
 
   // Chunk each segment
   const chunks: ChunkResult[] = [];
   let chunkIndex = 0;
 
   for (const segment of segments) {
-    // Skip very small segments
+    // Skip very small segments and warn about it
     if (segment.content.length < MIN_CHUNK_SIZE) {
+      warnings.push(`Segment at line ${segment.startLine} too small (${segment.content.length} chars), skipped`);
       continue;
     }
 
@@ -381,32 +399,48 @@ export async function chunkFiles(
 }
 
 /**
- * Extract segments from file content based on type.
+ * Result of segment extraction with error handling.
  */
-function extractSegments(content: string, fileInfo: FileInfo): ExtractedSegment[] {
-  // Config files → treat as single segment
+interface ExtractionResultWithError {
+  segments: ExtractedSegment[];
+  error?: string;
+}
+
+/**
+ * Extract segments from file content based on type.
+ *
+ * Wraps extractor calls in try-catch to capture parse errors gracefully
+ * instead of crashing the entire chunking pipeline.
+ */
+function extractSegments(content: string, fileInfo: FileInfo): ExtractionResultWithError {
+  // Config files → treat as single segment (no parsing, can't fail)
   if (fileInfo.type === 'config') {
-    return [{
-      content,
-      contentType: 'config',
-      startLine: 1,
-      endLine: content.split('\n').length,
-      metadata: {},
-    }];
+    return {
+      segments: [{
+        content,
+        contentType: 'config',
+        startLine: 1,
+        endLine: content.split('\n').length,
+        metadata: {},
+      }],
+    };
   }
 
-  // Markdown files → use markdown extractor
-  if (isMarkdown(fileInfo.extension)) {
-    return extractMarkdownSegments(content).segments;
-  }
+  try {
+    // Markdown files → use markdown extractor
+    if (isMarkdown(fileInfo.extension)) {
+      return { segments: extractMarkdownSegments(content).segments };
+    }
 
-  // Code files with AST support → use code extractor
-  if (isLanguageSupported(fileInfo.language)) {
-    return extractCodeSegments(content, fileInfo.language).segments;
+    // Code files (supported or fallback) → use code extractor
+    return { segments: extractCodeSegments(content, fileInfo.language).segments };
+  } catch (error) {
+    // Parsing failed - return error instead of crashing
+    return {
+      segments: [],
+      error: (error as Error).message,
+    };
   }
-
-  // Unsupported code files → use fallback code extraction
-  return extractCodeSegments(content, fileInfo.language).segments;
 }
 
 /**
