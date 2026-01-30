@@ -20,7 +20,15 @@
 export { getDb, closeDb, getDbPath, getCtxDir } from './connection.js';
 
 // Migration utilities
-export { runMigrations, hasPendingMigrations, getAppliedMigrations } from './migrate.js';
+export {
+  runMigrations,
+  hasPendingMigrations,
+  getAppliedMigrations,
+  // State tracking (Ticket #52)
+  resetMigrationState,
+  isMigrationInitialized,
+  getMigrationCount,
+} from './migrate.js';
 
 // Schema types
 export type {
@@ -34,6 +42,24 @@ export type {
 
 // Utility functions
 export { generateId, embeddingToBlob, blobToEmbedding } from './schema.js';
+
+// Validation schemas and utilities (Ticket #51)
+export {
+  // Schemas
+  ProjectRowSchema,
+  ChunkRowSchema,
+  FileHashRowSchema,
+  // Types
+  type ProjectRow,
+  type ChunkRow,
+  type FileHashRow,
+  // Error class
+  SchemaValidationError,
+  // Validation functions
+  validateRow,
+  validateRows,
+  safeValidateRow,
+} from './validation.js';
 
 // High-level database operations
 export {

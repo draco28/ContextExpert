@@ -7,6 +7,34 @@
 
 import { getDb } from './connection.js';
 
+// ============================================================================
+// Migration State Tracking (Ticket #52)
+// ============================================================================
+
+/**
+ * Process-level migration state.
+ *
+ * Why module-level state?
+ * - Node.js caches modules, so this persists across all imports
+ * - Prevents redundant database calls when multiple commands call runMigrations()
+ * - Can be reset for testing via resetMigrationState()
+ */
+interface MigrationState {
+  /** Whether migrations have been checked/applied this process */
+  initialized: boolean;
+  /** Names of applied migrations (from _migrations table) */
+  applied: Set<string>;
+  /** Timestamp when state was initialized */
+  lastCheck: number;
+}
+
+/** Module-level state - null until first runMigrations() call */
+let migrationState: MigrationState | null = null;
+
+// ============================================================================
+// Embedded Migrations
+// ============================================================================
+
 // Embedded migrations (bundler-friendly approach)
 // SQL files are embedded as strings to avoid file system dependencies in bundled output
 const MIGRATIONS: Array<{ name: string; sql: string }> = [
@@ -103,6 +131,12 @@ CREATE INDEX IF NOT EXISTS idx_projects_embedding_model ON projects(embedding_mo
  * ```
  */
 export function runMigrations(): string[] {
+  // Fast path: already initialized this process
+  // This prevents redundant database calls when multiple commands invoke runMigrations()
+  if (migrationState?.initialized) {
+    return [];
+  }
+
   const db = getDb();
   const applied: string[] = [];
 
@@ -115,7 +149,7 @@ export function runMigrations(): string[] {
     )
   `);
 
-  // Get list of already-applied migrations
+  // Get list of already-applied migrations from database
   const appliedMigrations = new Set(
     db
       .prepare('SELECT name FROM _migrations')
@@ -136,7 +170,15 @@ export function runMigrations(): string[] {
     })();
 
     applied.push(migration.name);
+    appliedMigrations.add(migration.name); // Track newly applied
   }
+
+  // Cache state for future calls in this process
+  migrationState = {
+    initialized: true,
+    applied: appliedMigrations,
+    lastCheck: Date.now(),
+  };
 
   return applied;
 }
@@ -195,4 +237,52 @@ export function getAppliedMigrations(): Array<{
   return db
     .prepare('SELECT name, applied_at FROM _migrations ORDER BY id')
     .all() as Array<{ name: string; applied_at: string }>;
+}
+
+// ============================================================================
+// State Management Utilities (Ticket #52)
+// ============================================================================
+
+/**
+ * Reset migration state for testing.
+ *
+ * Call this to force the next runMigrations() to check the database again.
+ * Useful in tests that need to verify migration behavior.
+ *
+ * @example
+ * ```ts
+ * beforeEach(() => {
+ *   resetMigrationState();
+ * });
+ * ```
+ */
+export function resetMigrationState(): void {
+  migrationState = null;
+}
+
+/**
+ * Check if migrations have been initialized this process.
+ *
+ * @returns true if runMigrations() has been called successfully
+ *
+ * @example
+ * ```ts
+ * if (!isMigrationInitialized()) {
+ *   runMigrations();
+ * }
+ * ```
+ */
+export function isMigrationInitialized(): boolean {
+  return migrationState?.initialized ?? false;
+}
+
+/**
+ * Get count of available migrations.
+ *
+ * Useful for status commands to show migration info.
+ *
+ * @returns Total number of migrations defined in the system
+ */
+export function getMigrationCount(): number {
+  return MIGRATIONS.length;
 }
