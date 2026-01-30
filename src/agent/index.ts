@@ -83,3 +83,26 @@ export {
   RAGEngineError,
   RAGErrorCodes,
 } from './types.js';
+
+// ============================================================================
+// Citation Formatting
+// ============================================================================
+
+export {
+  createCitationFormatter,
+  formatCitation,
+  formatCitations,
+  formatCitationJSON,
+  formatCitationsJSON,
+  DEFAULT_CITATION_CONFIG,
+  CitationFormatOptionsSchema,
+  CitationStyleSchema,
+} from './citations.js';
+
+export type {
+  CitationStyle,
+  CitationFormatOptions,
+  CitationJSON,
+  CitationsOutputJSON,
+  CitationFormatter,
+} from './citations.js';
