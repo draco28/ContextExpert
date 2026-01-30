@@ -135,7 +135,7 @@ export const CitationFormatOptionsSchema = z.object({
   style: CitationStyleSchema.optional(),
   showScores: z.boolean().optional(),
   showLanguage: z.boolean().optional(),
-  limit: z.number().int().min(1).optional(),
+  limit: z.number().int().min(0).optional(),
   showTruncationHint: z.boolean().optional(),
 });
 

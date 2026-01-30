@@ -320,6 +320,13 @@ describe('CitationFormatOptionsSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('should accept limit of 0 (unlimited)', () => {
+    const result = CitationFormatOptionsSchema.safeParse({
+      limit: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('should reject non-integer limit', () => {
     const result = CitationFormatOptionsSchema.safeParse({
       limit: 2.5,
@@ -340,10 +347,18 @@ describe('createCitationFormatter validation', () => {
     }).toThrow();
   });
 
-  it('should throw ZodError for invalid limit', () => {
+  it('should throw ZodError for negative limit', () => {
     expect(() => {
       createCitationFormatter({ limit: -5 });
     }).toThrow();
+  });
+
+  it('should accept limit of 0 (unlimited)', () => {
+    // This should NOT throw - 0 means unlimited
+    const formatter = createCitationFormatter({ limit: 0 });
+    const result = formatter.format(mockSources);
+    // All 5 sources should be shown (no truncation)
+    expect(result.split('\n')).toHaveLength(5);
   });
 });
 
