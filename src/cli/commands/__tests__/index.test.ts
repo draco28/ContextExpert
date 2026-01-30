@@ -22,6 +22,9 @@ import type { CommandContext } from '../../types.js';
 vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
   statSync: vi.fn(),
+  realpathSync: vi.fn((path: string) => path), // Return path as-is for tests
+  accessSync: vi.fn(), // No-op for permission checks
+  constants: { R_OK: 4 },
 }));
 
 vi.mock('../../../database/index.js', () => ({
