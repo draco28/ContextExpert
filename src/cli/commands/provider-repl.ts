@@ -301,15 +301,20 @@ async function handleProviderAdd(
 
     let gotResponse = false;
     for await (const chunk of stream) {
-      if (chunk.type === 'text' && chunk.content) {
+      // Accept text content
+      if ((chunk.type === 'text' || chunk.type === 'content') && chunk.content) {
+        gotResponse = true;
+        break;
+      }
+      // Accept 'done' or 'usage' - if we got here without error, the API works
+      if (chunk.type === 'done' || chunk.type === 'usage') {
         gotResponse = true;
         break;
       }
     }
 
     if (!gotResponse) {
-      spinner.fail('Provider responded but returned no content.');
-      ctx.log(chalk.dim('Check the model name and API key.'));
+      spinner.fail('Provider did not respond. Check your API key and base URL.');
       return { handled: true };
     }
 
