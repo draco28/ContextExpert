@@ -37,6 +37,8 @@ import { formatCitations } from '../../agent/citations.js';
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import type { Project } from '../../database/schema.js';
+import { handleProviderCommand, createProviderFromConfig } from './provider-repl.js';
+import { getDefaultProvider } from '../../config/providers.js';
 
 // ============================================================================
 // Types
@@ -53,8 +55,9 @@ interface ChatCommandOptions {
 /**
  * Mutable state for the chat REPL session.
  * Persists across user inputs within a single session.
+ * Exported for use by provider-repl.ts handlers.
  */
-interface ChatState {
+export interface ChatState {
   /** Currently focused project (null = no RAG, pure LLM mode) */
   currentProject: Project | null;
   /** Conversation history with automatic truncation (from @contextaisdk/core) */
@@ -351,6 +354,15 @@ const REPL_COMMANDS: REPLCommand[] = [
     },
   },
   {
+    name: 'provider',
+    aliases: ['prov'],
+    description: 'Manage LLM providers (add, list, use, remove, test)',
+    usage: '<subcommand>',
+    handler: async (args, state, ctx) => {
+      return handleProviderCommand(args, state, ctx);
+    },
+  },
+  {
     name: 'exit',
     aliases: ['quit', 'q'],
     description: 'Exit the chat',
@@ -609,6 +621,18 @@ export function createCompleter(
       return [matches, line];
     }
 
+    // Check for /provider or /prov command with at least one space after
+    const providerMatch = line.match(/^\/(provider|prov)\s+(.*)$/i);
+    if (providerMatch) {
+      const prefix = providerMatch[1] ?? 'provider';
+      const partial = (providerMatch[2] ?? '').toLowerCase();
+      const subcommands = ['add', 'list', 'use', 'remove', 'test', 'help'];
+      const matches = subcommands
+        .filter((cmd) => cmd.startsWith(partial))
+        .map((cmd) => `/${prefix} ${cmd}`);
+      return [matches, line];
+    }
+
     // No completion for other input
     return [[], line];
   };
@@ -753,17 +777,52 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       // 3. Create LLM provider (cached for session)
       // ─────────────────────────────────────────────────────────────────────
       ctx.debug('Creating LLM provider...');
-      const {
-        provider,
-        name: providerName,
-        model,
-      } = await createLLMProvider(config, {
-        fallback: {
-          onFallback: (from, to, reason) => {
-            ctx.debug(`LLM fallback: ${from} → ${to} (${reason})`);
+
+      let provider: ChatState['llmProvider'];
+      let providerName: string;
+      let model: string;
+
+      // First, check for a stored default provider from /provider add
+      const storedProvider = getDefaultProvider();
+      if (storedProvider) {
+        ctx.debug(`Using stored provider: ${storedProvider.name}`);
+        try {
+          const result = await createProviderFromConfig(
+            storedProvider.name,
+            storedProvider.config
+          );
+          provider = result.provider;
+          providerName = result.displayName;
+          model = result.model;
+        } catch (error) {
+          // If stored provider fails, fall back to config-based
+          ctx.debug(
+            `Stored provider failed, falling back: ${error instanceof Error ? error.message : String(error)}`
+          );
+          const result = await createLLMProvider(config, {
+            fallback: {
+              onFallback: (from, to, reason) => {
+                ctx.debug(`LLM fallback: ${from} → ${to} (${reason})`);
+              },
+            },
+          });
+          provider = result.provider;
+          providerName = result.name;
+          model = result.model;
+        }
+      } else {
+        // No stored provider, use config-based with fallback chain
+        const result = await createLLMProvider(config, {
+          fallback: {
+            onFallback: (from, to, reason) => {
+              ctx.debug(`LLM fallback: ${from} → ${to} (${reason})`);
+            },
           },
-        },
-      });
+        });
+        provider = result.provider;
+        providerName = result.name;
+        model = result.model;
+      }
 
       ctx.debug(`Using: ${providerName}/${model}`);
 

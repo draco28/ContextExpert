@@ -28,6 +28,13 @@ export interface AnthropicProviderOptions {
   model?: string;
 
   /**
+   * Explicit API key to use.
+   * If provided, skips environment variable lookup (ANTHROPIC_API_KEY).
+   * Used for stored provider configurations.
+   */
+  apiKey?: string;
+
+  /**
    * Request timeout in milliseconds.
    * @default 60000 (60 seconds)
    */
@@ -102,15 +109,20 @@ export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-20250514';
 export async function createAnthropicProvider(
   options: AnthropicProviderOptions = {}
 ): Promise<AnthropicProviderResult> {
-  // 1. Validate API key format and presence
-  const validation = validateAnthropicKey();
-  if (!validation.valid) {
-    // Throw with both error and setup instructions for actionable feedback
-    throw new Error(`${validation.error}\n\n${validation.setupInstructions}`);
-  }
+  let apiKey: string;
 
-  // 2. Get API key securely (skip redundant validation since we just validated)
-  const apiKey = getProviderKeyUnsafe('anthropic');
+  // 1. Get API key - either from explicit option or environment
+  if (options.apiKey) {
+    // Use explicitly provided key (for stored provider configs)
+    apiKey = options.apiKey;
+  } else {
+    // Validate and get from environment variable
+    const validation = validateAnthropicKey();
+    if (!validation.valid) {
+      throw new Error(`${validation.error}\n\n${validation.setupInstructions}`);
+    }
+    apiKey = getProviderKeyUnsafe('anthropic');
+  }
 
   // 3. Determine model to use
   const model = options.model ?? DEFAULT_ANTHROPIC_MODEL;

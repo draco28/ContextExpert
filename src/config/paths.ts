@@ -6,8 +6,9 @@
  *
  * Directory structure:
  * ~/.ctx/
- * ├── context.db    (SQLite database)
- * └── config.toml   (User configuration)
+ * ├── context.db      (SQLite database)
+ * ├── config.toml     (User configuration)
+ * └── providers.json  (LLM provider configs)
  */
 
 import { join } from 'node:path';
@@ -17,6 +18,7 @@ import { homedir } from 'node:os';
 export const CTX_DIR = join(homedir(), '.ctx');
 export const DB_PATH = join(CTX_DIR, 'context.db');
 export const CONFIG_PATH = join(CTX_DIR, 'config.toml');
+export const PROVIDERS_PATH = join(CTX_DIR, 'providers.json');
 
 /**
  * Get the ctx directory path (~/.ctx)
@@ -40,4 +42,12 @@ export function getDbPath(): string {
  */
 export function getConfigPath(): string {
   return CONFIG_PATH;
+}
+
+/**
+ * Get the providers file path (~/.ctx/providers.json)
+ * @returns Absolute path to the providers JSON file
+ */
+export function getProvidersPath(): string {
+  return PROVIDERS_PATH;
 }
