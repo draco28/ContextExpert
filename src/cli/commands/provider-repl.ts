@@ -67,6 +67,21 @@ const PROVIDER_TYPES: ConfiguredProviderType[] = [
 // ============================================================================
 
 /**
+ * Create a temporary readline interface for wizard prompts.
+ *
+ * IMPORTANT: We create a separate readline interface for the wizard to avoid
+ * interfering with the main REPL's async iterator. Using rl.question() on the
+ * same interface that's being iterated with `for await (const line of rl)`
+ * causes the async iterator to terminate unexpectedly.
+ */
+function createWizardReadline(): readline.Interface {
+  return readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+}
+
+/**
  * Prompt for user input with optional default value.
  * Returns a promise that resolves with the user's input.
  */
@@ -192,160 +207,166 @@ export async function createProviderFromConfig(
  * 5. Enter API key
  * 6. Test connection
  * 7. Save on success
+ *
+ * IMPORTANT: Uses a separate readline interface to avoid interfering with
+ * the main REPL's async iterator loop. The wizard readline is closed when done.
  */
 async function handleProviderAdd(
-  state: ChatState,
+  _state: ChatState,
   ctx: CommandContext
 ): Promise<ProviderCommandResult> {
-  const rl = state.rl;
-  if (!rl) {
-    ctx.error('Cannot run interactive wizard without readline interface');
-    return { handled: true };
-  }
+  // Create a separate readline interface for the wizard
+  // This avoids interfering with the main REPL's async iterator
+  const rl = createWizardReadline();
 
-  ctx.log('');
-  ctx.log(chalk.bold('Add New LLM Provider'));
-  ctx.log('');
+  try {
+    ctx.log('');
+    ctx.log(chalk.bold('Add New LLM Provider'));
+    ctx.log('');
 
-  // Step 1: Select provider type
-  const providerType = await promptSelect(
-    rl,
-    'Select provider type:',
-    PROVIDER_TYPES
-  );
+    // Step 1: Select provider type
+    const providerType = await promptSelect(
+      rl,
+      'Select provider type:',
+      PROVIDER_TYPES
+    );
 
-  // Step 2: Provider name
-  const defaultName =
-    providerType === 'openai-compatible' ? 'my-provider' : providerType;
-  const name = await prompt(rl, 'Provider name', defaultName);
+    // Step 2: Provider name
+    const defaultName =
+      providerType === 'openai-compatible' ? 'my-provider' : providerType;
+    const name = await prompt(rl, 'Provider name', defaultName);
 
-  // Check if name already exists
-  const existing = getProvider(name);
-  if (existing) {
-    ctx.error(`Provider "${name}" already exists.`);
-    ctx.log(chalk.dim('Choose a different name or use /provider remove first.'));
-    return { handled: true };
-  }
-
-  // Step 3: Base URL (openai-compatible only)
-  let baseURL: string | undefined;
-  if (providerType === 'openai-compatible') {
-    baseURL = await prompt(rl, 'API Base URL');
-    if (!baseURL) {
-      ctx.error('Base URL is required for openai-compatible providers.');
+    // Check if name already exists
+    const existing = getProvider(name);
+    if (existing) {
+      ctx.error(`Provider "${name}" already exists.`);
+      ctx.log(chalk.dim('Choose a different name or use /provider remove first.'));
       return { handled: true };
     }
-    // Basic URL validation
+
+    // Step 3: Base URL (openai-compatible only)
+    let baseURL: string | undefined;
+    if (providerType === 'openai-compatible') {
+      baseURL = await prompt(rl, 'API Base URL');
+      if (!baseURL) {
+        ctx.error('Base URL is required for openai-compatible providers.');
+        return { handled: true };
+      }
+      // Basic URL validation
+      try {
+        new URL(baseURL);
+      } catch {
+        ctx.error('Invalid URL format.');
+        return { handled: true };
+      }
+    }
+
+    // Step 4: Model
+    let defaultModel = '';
+    switch (providerType) {
+      case 'anthropic':
+        defaultModel = DEFAULT_ANTHROPIC_MODEL;
+        break;
+      case 'openai':
+        defaultModel = DEFAULT_OPENAI_MODEL;
+        break;
+      case 'openai-compatible':
+        defaultModel = ''; // No sensible default for custom APIs
+        break;
+    }
+    const model = await prompt(rl, 'Model', defaultModel);
+    if (!model) {
+      ctx.error('Model is required.');
+      return { handled: true };
+    }
+
+    // Step 5: API Key
+    const apiKey = await prompt(rl, 'API Key');
+    if (!apiKey) {
+      ctx.error('API key is required.');
+      return { handled: true };
+    }
+
+    // Step 6: Build config and test connection
+    let config: ProviderConfig;
+    switch (providerType) {
+      case 'anthropic':
+        config = { type: 'anthropic', model, apiKey };
+        break;
+      case 'openai':
+        config = { type: 'openai', model, apiKey };
+        break;
+      case 'openai-compatible':
+        config = { type: 'openai-compatible', model, apiKey, baseURL: baseURL! };
+        break;
+    }
+
+    // Test the connection
+    const spinner = ora({
+      text: 'Testing connection...',
+      color: 'cyan',
+    }).start();
+
     try {
-      new URL(baseURL);
-    } catch {
-      ctx.error('Invalid URL format.');
-      return { handled: true };
-    }
-  }
+      const { provider } = await createProviderFromConfig(name, config);
 
-  // Step 4: Model
-  let defaultModel = '';
-  switch (providerType) {
-    case 'anthropic':
-      defaultModel = DEFAULT_ANTHROPIC_MODEL;
-      break;
-    case 'openai':
-      defaultModel = DEFAULT_OPENAI_MODEL;
-      break;
-    case 'openai-compatible':
-      defaultModel = ''; // No sensible default for custom APIs
-      break;
-  }
-  const model = await prompt(rl, 'Model', defaultModel);
-  if (!model) {
-    ctx.error('Model is required.');
-    return { handled: true };
-  }
+      // Send a minimal test request
+      const stream = provider.streamChat(
+        [{ role: 'user', content: 'Say "OK" and nothing else.' }],
+        { maxTokens: 10 }
+      );
 
-  // Step 5: API Key
-  const apiKey = await prompt(rl, 'API Key');
-  if (!apiKey) {
-    ctx.error('API key is required.');
-    return { handled: true };
-  }
-
-  // Step 6: Build config and test connection
-  let config: ProviderConfig;
-  switch (providerType) {
-    case 'anthropic':
-      config = { type: 'anthropic', model, apiKey };
-      break;
-    case 'openai':
-      config = { type: 'openai', model, apiKey };
-      break;
-    case 'openai-compatible':
-      config = { type: 'openai-compatible', model, apiKey, baseURL: baseURL! };
-      break;
-  }
-
-  // Test the connection
-  const spinner = ora({
-    text: 'Testing connection...',
-    color: 'cyan',
-  }).start();
-
-  try {
-    const { provider } = await createProviderFromConfig(name, config);
-
-    // Send a minimal test request
-    const stream = provider.streamChat(
-      [{ role: 'user', content: 'Say "OK" and nothing else.' }],
-      { maxTokens: 10 }
-    );
-
-    let gotResponse = false;
-    for await (const chunk of stream) {
-      // Accept text content
-      if ((chunk.type === 'text' || chunk.type === 'content') && chunk.content) {
-        gotResponse = true;
-        break;
+      let gotResponse = false;
+      for await (const chunk of stream) {
+        // Accept text content
+        if ((chunk.type === 'text' || chunk.type === 'content') && chunk.content) {
+          gotResponse = true;
+          break;
+        }
+        // Accept 'done' or 'usage' - if we got here without error, the API works
+        if (chunk.type === 'done' || chunk.type === 'usage') {
+          gotResponse = true;
+          break;
+        }
       }
-      // Accept 'done' or 'usage' - if we got here without error, the API works
-      if (chunk.type === 'done' || chunk.type === 'usage') {
-        gotResponse = true;
-        break;
-      }
-    }
 
-    if (!gotResponse) {
-      spinner.fail('Provider did not respond. Check your API key and base URL.');
+      if (!gotResponse) {
+        spinner.fail('Provider did not respond. Check your API key and base URL.');
+        return { handled: true };
+      }
+
+      spinner.succeed('Connection successful!');
+    } catch (error) {
+      spinner.fail(
+        `Connection failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+      ctx.log(chalk.dim('Check your API key, base URL, and model name.'));
       return { handled: true };
     }
 
-    spinner.succeed('Connection successful!');
-  } catch (error) {
-    spinner.fail(
-      `Connection failed: ${error instanceof Error ? error.message : String(error)}`
-    );
-    ctx.log(chalk.dim('Check your API key, base URL, and model name.'));
-    return { handled: true };
-  }
+    // Step 7: Save the provider
+    try {
+      addProvider(name, config);
+      ctx.log('');
+      ctx.log(chalk.green(`✓ Provider "${name}" configured successfully!`));
 
-  // Step 7: Save the provider
-  try {
-    addProvider(name, config);
-    ctx.log('');
-    ctx.log(chalk.green(`✓ Provider "${name}" configured successfully!`));
-
-    // Check if it became the default
-    const providers = loadProviders();
-    if (providers.default === name) {
-      ctx.log(chalk.dim('  (set as default provider)'));
+      // Check if it became the default
+      const providers = loadProviders();
+      if (providers.default === name) {
+        ctx.log(chalk.dim('  (set as default provider)'));
+      }
+      ctx.log('');
+    } catch (error) {
+      ctx.error(
+        `Failed to save provider: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
-    ctx.log('');
-  } catch (error) {
-    ctx.error(
-      `Failed to save provider: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
 
-  return { handled: true };
+    return { handled: true };
+  } finally {
+    // Always close the wizard readline to avoid interference with main REPL
+    rl.close();
+  }
 }
 
 /**
