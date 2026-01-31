@@ -409,3 +409,86 @@ describe('singleton functions', () => {
     expect(manager2.cacheSize).toBe(0);
   });
 });
+
+describe('BM25StoreManager edge cases', () => {
+  beforeEach(() => {
+    resetBM25StoreManager();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    resetBM25StoreManager();
+  });
+
+  describe('metadata handling', () => {
+    it('should handle corrupted JSON in metadata', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'valid content for BM25 indexing',
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: '{not valid json at all', // Corrupted JSON
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const manager = new BM25StoreManager();
+
+      // Should not throw - corrupted metadata handled gracefully
+      const retriever = await manager.getRetriever({ projectId: 'test-project' });
+
+      expect(retriever).toBeDefined();
+    });
+
+    it('should continue loading after corrupted metadata', async () => {
+      // Mix of valid and invalid metadata
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'first chunk content',
+          file_path: 'src/file1.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: '{broken', // Corrupted
+        },
+        {
+          id: 'chunk-2',
+          content: 'second chunk content',
+          file_path: 'src/file2.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: JSON.stringify({ valid: true }), // Valid
+        },
+        {
+          id: 'chunk-3',
+          content: 'third chunk content',
+          file_path: 'src/file3.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null, // Null (valid)
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const manager = new BM25StoreManager();
+      const retriever = await manager.getRetriever({ projectId: 'test-project' });
+
+      // All chunks should be loaded despite corrupted metadata in one
+      expect(retriever).toBeDefined();
+    });
+  });
+});

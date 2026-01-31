@@ -570,6 +570,342 @@ describe('BM25SearchService', () => {
       expect(service.getProjectId()).toBe('my-project-123');
     });
   });
+
+  describe('query edge cases', () => {
+    it('should reject empty string query', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'some content',
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // SDK BM25Retriever validates and rejects empty queries
+      await expect(service.search('')).rejects.toThrow(/Query cannot be empty/);
+    });
+
+    it('should handle single-word query', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'authentication middleware function',
+          file_path: 'src/auth.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      const results = await service.search('authentication');
+      expect(results.length).toBe(1);
+    });
+
+    it('should handle query with repeated words', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'database database database connection',
+          file_path: 'src/db.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+        {
+          id: 'chunk-2',
+          content: 'database connection pool',
+          file_path: 'src/pool.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Repeated words in query - should not crash
+      const results = await service.search('database database database');
+      expect(results.length).toBeGreaterThan(0);
+    });
+
+    it('should handle query with special characters', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'C++ std::vector<int> implementation',
+          file_path: 'src/cpp.cpp',
+          file_type: 'code',
+          language: 'cpp',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Special characters in query
+      const results = await service.search('C++ std::vector<int>');
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('should handle query with numeric tokens', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'HTTP error 404 status code handling',
+          file_path: 'src/errors.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+        {
+          id: 'chunk-2',
+          content: 'HTTP error 500 internal server error',
+          file_path: 'src/server.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Query with numbers
+      const results = await service.search('error 404 status 500');
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('should handle Unicode queries', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'données utilisateur authentication 数据库',
+          file_path: 'src/i18n.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // French with accents and Chinese characters
+      const results = await service.search('données 数据库');
+      expect(Array.isArray(results)).toBe(true);
+    });
+  });
+
+  describe('filter edge cases', () => {
+    it('should handle combined fileType and language filters', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'database handler implementation',
+          file_path: 'src/db.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+        {
+          id: 'chunk-2',
+          content: 'database handler implementation',
+          file_path: 'src/db.py',
+          file_type: 'code',
+          language: 'python',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+        {
+          id: 'chunk-3',
+          content: 'database handler documentation',
+          file_path: 'docs/db.md',
+          file_type: 'docs',
+          language: null,
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Both filters must match (AND logic)
+      const results = await service.search('database handler', {
+        fileType: 'code',
+        language: 'typescript',
+      });
+
+      expect(results.length).toBe(1);
+      expect(results[0]!.id).toBe('chunk-1');
+    });
+
+    it('should return empty when all results filtered out', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'database handler in python',
+          file_path: 'src/db.py',
+          file_type: 'code',
+          language: 'python',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Filter excludes all results
+      const results = await service.search('database handler', {
+        language: 'typescript', // No TypeScript chunks
+      });
+
+      expect(results).toEqual([]);
+    });
+
+    it('should return all results when minScore is 0', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'database connection high match',
+          file_path: 'src/db1.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+        {
+          id: 'chunk-2',
+          content: 'database low match content',
+          file_path: 'src/db2.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      const results = await service.search('database connection', {
+        minScore: 0,
+      });
+
+      // Should return all matching results
+      expect(results.length).toBe(2);
+    });
+
+    it('should return empty when minScore is very high', async () => {
+      const testChunks: ChunkRow[] = [
+        {
+          id: 'chunk-1',
+          content: 'database content',
+          file_path: 'src/db.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const service = createBM25SearchService('test-project', {
+        top_k: 10,
+        rerank: false,
+      });
+
+      // Very high minScore - BM25 scores are typically < 100
+      const results = await service.search('database', {
+        minScore: 999999,
+      });
+
+      expect(results).toEqual([]);
+    });
+  });
 });
 
 describe('createBM25SearchService', () => {

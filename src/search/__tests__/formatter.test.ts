@@ -361,4 +361,72 @@ describe('edge cases', () => {
     expect(formatResult(result)).toContain('[1.00]');
     expect(formatResultJSON(result).score).toBe(1);
   });
+
+  it('should handle empty filePath', () => {
+    const result = createMockResult({ filePath: '' });
+
+    const text = formatResult(result);
+    const json = formatResultJSON(result);
+
+    // Should not crash with empty path
+    expect(text).toBeDefined();
+    expect(json.filePath).toBe('');
+  });
+
+  it('should handle negative line numbers', () => {
+    const result = createMockResult({
+      lineRange: { start: -1, end: -5 },
+    });
+
+    // Should handle gracefully even though this is invalid data
+    const text = formatResult(result);
+    expect(text).toBeDefined();
+  });
+
+  it('should handle Unicode in file paths', () => {
+    const result = createMockResult({
+      filePath: 'src/认证/身份验证/認證.ts',
+    });
+
+    const text = formatResult(result);
+    const json = formatResultJSON(result);
+
+    expect(text).toContain('认证');
+    expect(json.filePath).toBe('src/认证/身份验证/認證.ts');
+  });
+
+  it('should handle very high line numbers', () => {
+    const result = createMockResult({
+      lineRange: { start: 999999, end: 1000000 },
+    });
+
+    const text = formatResult(result);
+    const json = formatResultJSON(result);
+
+    expect(text).toContain('999999-1000000');
+    expect(json.lineStart).toBe(999999);
+    expect(json.lineEnd).toBe(1000000);
+  });
+
+  it('should handle content with only whitespace', () => {
+    const result = createMockResult({
+      content: '   \t\n   \r\n   ',
+    });
+
+    const text = formatResult(result);
+    // Whitespace should be collapsed/normalized
+    expect(text).toBeDefined();
+  });
+
+  it('should handle content with emojis', () => {
+    const result = createMockResult({
+      content: '// TODO: 🚀 implement this feature 💡',
+    });
+
+    const text = formatResult(result);
+    const json = formatResultJSON(result);
+
+    expect(text).toContain('🚀');
+    expect(json.content).toContain('💡');
+  });
 });

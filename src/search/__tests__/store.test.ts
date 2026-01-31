@@ -410,3 +410,166 @@ describe('singleton functions', () => {
     expect(manager1).not.toBe(manager2);
   });
 });
+
+describe('VectorStoreManager edge cases', () => {
+  beforeEach(() => {
+    resetVectorStoreManager();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    resetVectorStoreManager();
+  });
+
+  describe('metadata handling', () => {
+    it('should handle corrupted JSON in metadata', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'valid content',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: '{invalid json', // Corrupted JSON
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const manager = new VectorStoreManager();
+
+      // Should not throw - corrupted metadata is handled gracefully
+      const store = await manager.getStore({
+        projectId: 'test-project',
+        dimensions: 1024,
+      });
+
+      expect(store).toBeDefined();
+    });
+
+    it('should handle null metadata fields', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'content',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: null, // All optional fields are null
+          language: null,
+          start_line: null,
+          end_line: null,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const manager = new VectorStoreManager();
+
+      const store = await manager.getStore({
+        projectId: 'test-project',
+        dimensions: 1024,
+      });
+
+      expect(store).toBeDefined();
+    });
+
+    it('should handle empty string metadata', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'content',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: '', // Empty string instead of null or JSON
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const manager = new VectorStoreManager();
+
+      const store = await manager.getStore({
+        projectId: 'test-project',
+        dimensions: 1024,
+      });
+
+      expect(store).toBeDefined();
+    });
+  });
+
+  describe('embedding dimension validation', () => {
+    it('should throw on embedding dimension mismatch', async () => {
+      // Chunk has 768-dimension embedding, but we expect 1024
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'content',
+          embedding: createTestEmbedding(768, 1), // Wrong dimension!
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const manager = new VectorStoreManager();
+
+      await expect(
+        manager.getStore({
+          projectId: 'test-project',
+          dimensions: 1024, // Expecting 1024 but chunks have 768
+        })
+      ).rejects.toThrow(/dimension mismatch/i);
+    });
+
+    it('should include helpful message in dimension error', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'content',
+          embedding: createTestEmbedding(768, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const manager = new VectorStoreManager();
+
+      try {
+        await manager.getStore({
+          projectId: 'test-project',
+          dimensions: 1024,
+        });
+        expect.fail('Should have thrown');
+      } catch (err) {
+        const message = (err as Error).message;
+        // Should mention both expected and actual dimensions
+        expect(message).toMatch(/768/);
+        expect(message).toMatch(/1024/);
+      }
+    });
+  });
+});

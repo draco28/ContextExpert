@@ -321,6 +321,170 @@ describe('RerankerService', () => {
       });
     });
   });
+
+  describe('edge cases - result sizes', () => {
+    it('should handle single result', async () => {
+      const service = new RerankerService();
+      const results = createMockResults(1);
+
+      const reranked = await service.rerank('test query', results, 5);
+
+      expect(reranked.length).toBe(1);
+      expect(reranked[0]!.id).toBe('chunk-1');
+    });
+
+    it('should handle exactly candidateCount results', async () => {
+      const service = new RerankerService({ candidateCount: 5 });
+      const results = createMockResults(5); // Exactly matches candidateCount
+
+      const reranked = await service.rerank('test query', results, 5);
+
+      expect(reranked.length).toBe(5);
+    });
+
+    it('should handle results less than topK', async () => {
+      const service = new RerankerService();
+      const results = createMockResults(3); // Less than topK of 10
+
+      const reranked = await service.rerank('test query', results, 10);
+
+      // Should return all 3, not try to return 10
+      expect(reranked.length).toBe(3);
+    });
+
+    it('should handle large candidateCount (100+)', async () => {
+      const service = new RerankerService({ candidateCount: 100 });
+      const results = createMockResults(100);
+
+      const startTime = Date.now();
+      const reranked = await service.rerank('test query', results, 10);
+      const elapsed = Date.now() - startTime;
+
+      expect(reranked.length).toBe(10);
+      // Should complete in reasonable time with mocked reranker
+      expect(elapsed).toBeLessThan(100);
+    });
+  });
+
+  describe('edge cases - content variations', () => {
+    it('should handle very long content in chunks', async () => {
+      const service = new RerankerService();
+      const longContent = 'a'.repeat(10000); // 10KB of content
+      const results: SearchResultWithContext[] = [
+        {
+          id: 'long-chunk',
+          score: 0.8,
+          content: longContent,
+          filePath: 'src/large.ts',
+          fileType: 'code',
+          language: 'typescript',
+          lineRange: { start: 1, end: 1000 },
+          metadata: {},
+        },
+      ];
+
+      const reranked = await service.rerank('test query', results, 1);
+
+      expect(reranked.length).toBe(1);
+      expect(reranked[0]!.content.length).toBe(10000);
+    });
+
+    it('should handle very short content (single character)', async () => {
+      const service = new RerankerService();
+      const results: SearchResultWithContext[] = [
+        {
+          id: 'short-chunk',
+          score: 0.8,
+          content: 'x',
+          filePath: 'src/tiny.ts',
+          fileType: 'code',
+          language: 'typescript',
+          lineRange: { start: 1, end: 1 },
+          metadata: {},
+        },
+      ];
+
+      const reranked = await service.rerank('test query', results, 1);
+
+      expect(reranked.length).toBe(1);
+      expect(reranked[0]!.content).toBe('x');
+    });
+
+    it('should handle empty content string', async () => {
+      const service = new RerankerService();
+      const results: SearchResultWithContext[] = [
+        {
+          id: 'empty-chunk',
+          score: 0.8,
+          content: '',
+          filePath: 'src/empty.ts',
+          fileType: 'code',
+          language: 'typescript',
+          lineRange: { start: 1, end: 1 },
+          metadata: {},
+        },
+      ];
+
+      const reranked = await service.rerank('test query', results, 1);
+
+      expect(reranked.length).toBe(1);
+      expect(reranked[0]!.content).toBe('');
+    });
+
+    it('should handle content with special characters', async () => {
+      const service = new RerankerService();
+      const specialContent = '认证中间件 🎉 <script>alert("xss")</script>\n\t\r';
+      const results: SearchResultWithContext[] = [
+        {
+          id: 'special-chunk',
+          score: 0.8,
+          content: specialContent,
+          filePath: 'src/special.ts',
+          fileType: 'code',
+          language: 'typescript',
+          lineRange: { start: 1, end: 10 },
+          metadata: {},
+        },
+      ];
+
+      const reranked = await service.rerank('test query', results, 1);
+
+      expect(reranked.length).toBe(1);
+      expect(reranked[0]!.content).toBe(specialContent);
+    });
+  });
+
+  describe('concurrent rerank operations', () => {
+    it('should handle concurrent rerank calls', async () => {
+      const service = new RerankerService();
+      const results = createMockResults(5);
+
+      // Run multiple concurrent rerankings
+      const [r1, r2, r3] = await Promise.all([
+        service.rerank('query one', results, 3),
+        service.rerank('query two', results, 3),
+        service.rerank('query three', results, 3),
+      ]);
+
+      // Each should complete successfully
+      expect(r1.length).toBe(3);
+      expect(r2.length).toBe(3);
+      expect(r3.length).toBe(3);
+    });
+
+    it('should share reranker instance across calls', async () => {
+      const service = new RerankerService();
+      const results = createMockResults(3);
+
+      // Multiple rerank calls should share the same reranker
+      await service.rerank('query 1', results, 3);
+      await service.rerank('query 2', results, 3);
+      await service.rerank('query 3', results, 3);
+
+      // Only one BGEReranker instance created
+      expect(BGEReranker).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('RerankerService integration with FusionService', () => {

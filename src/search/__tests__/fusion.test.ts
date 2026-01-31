@@ -278,6 +278,121 @@ describe('computeRRF', () => {
       // Both have same rank (1), so same score, order depends on processing
       expect(fused[0]!.score).toEqual(fused[1]!.score);
     });
+
+    it('should maintain stable ordering for identical RRF scores', () => {
+      // When multiple items have identical scores, order should be deterministic
+      const denseResults = createMockResults(['A', 'B', 'C']);
+      const bm25Results = createMockResults(['D', 'E', 'F']);
+
+      // Run multiple times to verify stability
+      const fused1 = computeRRF(denseResults, bm25Results, { k: 60 });
+      const fused2 = computeRRF(denseResults, bm25Results, { k: 60 });
+      const fused3 = computeRRF(denseResults, bm25Results, { k: 60 });
+
+      // Order should be identical across runs
+      expect(fused1.map(r => r.id)).toEqual(fused2.map(r => r.id));
+      expect(fused2.map(r => r.id)).toEqual(fused3.map(r => r.id));
+    });
+
+    it('should handle very large k value (k=10000)', () => {
+      const denseResults = createMockResults(['A', 'B']);
+      const bm25Results = createMockResults(['C', 'D']);
+
+      const fused = computeRRF(denseResults, bm25Results, { k: 10000 });
+
+      expect(fused.length).toBe(4);
+      // Scores should be very small but not zero
+      // Formula: 1/(10000 + 1) = 0.00009999...
+      expect(fused[0]!.score).toBeGreaterThan(0);
+      expect(fused[0]!.score).toBeLessThan(0.001);
+    });
+
+    it('should handle very small k value (k=1)', () => {
+      const denseResults = createMockResults(['A', 'B']);
+      const bm25Results = createMockResults(['C', 'D']);
+
+      const fused = computeRRF(denseResults, bm25Results, { k: 1 });
+
+      expect(fused.length).toBe(4);
+      // First rank should dominate: 1/(1 + 1) = 0.5
+      expect(fused[0]!.score).toBe(0.5);
+    });
+
+    it('should handle all duplicates (every item in both lists)', () => {
+      const denseResults = createMockResults(['A', 'B', 'C']);
+      const bm25Results = createMockResults(['A', 'B', 'C']); // Same items
+
+      const fused = computeRRF(denseResults, bm25Results, { k: 60 });
+
+      // Should deduplicate - only 3 unique results
+      expect(fused.length).toBe(3);
+      // All should have combined scores from both lists
+      fused.forEach(result => {
+        // Score should be sum of ranks: 2 * 1/(k + rank)
+        expect(result.score).toBeGreaterThan(1 / 61); // More than single rank
+      });
+    });
+
+    it('should handle large result sets (100+ from each source)', () => {
+      // Generate 100 items for each source
+      const denseIds = Array.from({ length: 100 }, (_, i) => `D${i}`);
+      const bm25Ids = Array.from({ length: 100 }, (_, i) => `B${i}`);
+
+      const denseResults = createMockResults(denseIds);
+      const bm25Results = createMockResults(bm25Ids);
+
+      const startTime = Date.now();
+      const fused = computeRRF(denseResults, bm25Results, { k: 60 });
+      const elapsed = Date.now() - startTime;
+
+      expect(fused.length).toBe(200);
+      // Should complete in reasonable time (< 100ms for pure function)
+      expect(elapsed).toBeLessThan(100);
+    });
+
+    it('should handle negative weights correctly', () => {
+      const denseResults = createMockResults(['A']);
+      const bm25Results = createMockResults(['B']);
+
+      // Negative weight - unusual but should not crash
+      const fused = computeRRF(denseResults, bm25Results, {
+        k: 60,
+        weights: { dense: -1, bm25: 1 },
+      });
+
+      expect(fused.length).toBe(2);
+      // Dense result should have negative score
+      const scoreA = fused.find(r => r.id === 'A')!.score;
+      expect(scoreA).toBeLessThan(0);
+    });
+
+    it('should handle zero weights for both sources', () => {
+      const denseResults = createMockResults(['A', 'B']);
+      const bm25Results = createMockResults(['C', 'D']);
+
+      const fused = computeRRF(denseResults, bm25Results, {
+        k: 60,
+        weights: { dense: 0, bm25: 0 },
+      });
+
+      expect(fused.length).toBe(4);
+      // All scores should be 0
+      fused.forEach(result => {
+        expect(result.score).toBe(0);
+      });
+    });
+
+    it('should handle single result in dense only', () => {
+      const denseResults = createMockResults(['A']);
+      const bm25Results: SearchResultWithContext[] = [];
+
+      const fused = computeRRF(denseResults, bm25Results, { k: 60 });
+
+      expect(fused.length).toBe(1);
+      expect(fused[0]!.id).toBe('A');
+      // Score from dense only: 1/(60+1)
+      expect(fused[0]!.score).toBeCloseTo(1 / 61, 5);
+    });
   });
 });
 

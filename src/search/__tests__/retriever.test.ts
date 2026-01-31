@@ -456,6 +456,329 @@ describe('SearchService', () => {
       expect(service.getProjectId()).toBe('my-project-123');
     });
   });
+
+  describe('query edge cases', () => {
+    it('should reject empty string query', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'some content',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      // SDK DenseRetriever validates and rejects empty queries
+      await expect(service.search('')).rejects.toThrow(/Query cannot be empty/);
+    });
+
+    it('should reject whitespace-only query', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'some content',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      // SDK DenseRetriever validates and rejects whitespace-only queries
+      await expect(service.search('   \t\n  ')).rejects.toThrow(/Query cannot be empty/);
+    });
+
+    it('should handle Unicode query', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: '身份验证中间件 authentication',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/auth.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      // Chinese characters in query
+      const results = await service.search('身份验证');
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('should handle query with regex metacharacters', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'function test() { return [1, 2, 3]; }',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      // Query with regex special characters - should not crash
+      const results = await service.search('function(.*)[]{}|^$');
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('should handle query with newlines and tabs', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'multiline content',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      const results = await service.search('multi\nline\tcontent');
+      expect(Array.isArray(results)).toBe(true);
+    });
+
+    it('should handle very long query (>1000 chars)', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'some content',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'src/file.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      // 1500 character query
+      const longQuery = 'authentication '.repeat(100);
+      expect(longQuery.length).toBeGreaterThan(1000);
+
+      const results = await service.search(longQuery);
+      expect(Array.isArray(results)).toBe(true);
+    });
+  });
+
+  describe('concurrent search operations', () => {
+    it('should handle multiple concurrent searches', async () => {
+      const testChunks = Array.from({ length: 10 }, (_, i) => ({
+        id: `chunk-${i}`,
+        content: `Content about topic ${i}`,
+        embedding: createTestEmbedding(1024, i),
+        file_path: `file-${i}.ts`,
+        file_type: 'code',
+        language: 'typescript',
+        start_line: 1,
+        end_line: 10,
+        metadata: null,
+      }));
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      // Run 5 concurrent searches
+      const searches = Promise.all([
+        service.search('query one'),
+        service.search('query two'),
+        service.search('query three'),
+        service.search('query four'),
+        service.search('query five'),
+      ]);
+
+      const results = await searches;
+      expect(results.length).toBe(5);
+      results.forEach(r => {
+        expect(Array.isArray(r)).toBe(true);
+      });
+    });
+
+    it('should not corrupt results when searches overlap', async () => {
+      const testChunks = [
+        {
+          id: 'chunk-1',
+          content: 'authentication',
+          embedding: createTestEmbedding(1024, 1),
+          file_path: 'auth.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+        {
+          id: 'chunk-2',
+          content: 'database',
+          embedding: createTestEmbedding(1024, 2),
+          file_path: 'db.ts',
+          file_type: 'code',
+          language: 'typescript',
+          start_line: 1,
+          end_line: 10,
+          metadata: null,
+        },
+      ];
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      // Run concurrent searches with different topK
+      const [results1, results2] = await Promise.all([
+        service.search('test', { topK: 1 }),
+        service.search('test', { topK: 2 }),
+      ]);
+
+      // Each search should respect its own topK
+      expect(results1.length).toBeLessThanOrEqual(1);
+      expect(results2.length).toBeLessThanOrEqual(2);
+    });
+  });
+
+  describe('large result sets', () => {
+    it('should handle topK larger than available chunks', async () => {
+      // Only 5 chunks but requesting 1000
+      const testChunks = Array.from({ length: 5 }, (_, i) => ({
+        id: `chunk-${i}`,
+        content: `Content ${i}`,
+        embedding: createTestEmbedding(1024, i),
+        file_path: `file-${i}.ts`,
+        file_type: 'code',
+        language: null,
+        start_line: 1,
+        end_line: 10,
+        metadata: null,
+      }));
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      const results = await service.search('content', { topK: 1000 });
+
+      // Should return all available chunks, not crash
+      expect(results.length).toBeLessThanOrEqual(5);
+    });
+
+    it('should handle dataset with 1000+ chunks', async () => {
+      // Create 1100 chunks
+      const testChunks = Array.from({ length: 1100 }, (_, i) => ({
+        id: `chunk-${i}`,
+        content: `Content about various topics ${i}`,
+        embedding: createTestEmbedding(1024, i),
+        file_path: `file-${i % 100}.ts`,
+        file_type: 'code',
+        language: 'typescript',
+        start_line: 1 + (i * 10),
+        end_line: 10 + (i * 10),
+        metadata: null,
+      }));
+
+      const mockDb = createMockDb(testChunks);
+      vi.mocked(getDb).mockReturnValue(mockDb as any);
+
+      const provider = createMockProvider();
+      const service = createSearchService('test-project', provider, {
+        top_k: 10,
+        rerank: false,
+      }, { dimensions: 1024 });
+
+      const results = await service.search('content', { topK: 50 });
+
+      // Should efficiently return top 50 results
+      expect(results.length).toBeLessThanOrEqual(50);
+      expect(results.length).toBeGreaterThan(0);
+    });
+  });
 });
 
 describe('createSearchService', () => {
