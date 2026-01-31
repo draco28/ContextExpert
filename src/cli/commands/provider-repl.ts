@@ -525,7 +525,13 @@ async function handleProviderTest(
 
     let gotResponse = false;
     for await (const chunk of stream) {
-      if (chunk.type === 'text' && chunk.content) {
+      // Accept text content
+      if ((chunk.type === 'text' || chunk.type === 'content') && chunk.content) {
+        gotResponse = true;
+        break;
+      }
+      // Accept 'done' or 'usage' - if we got here without error, the API works
+      if (chunk.type === 'done' || chunk.type === 'usage') {
         gotResponse = true;
         break;
       }
