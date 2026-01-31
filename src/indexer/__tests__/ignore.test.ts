@@ -8,6 +8,7 @@ import {
   loadGitignoreFile,
   parseGitignoreContent,
   createIgnoreFilter,
+  createFastGlobIgnoreFilter,
   isBinaryFile,
 } from '../ignore.js';
 
@@ -191,6 +192,291 @@ describe('createIgnoreFilter', () => {
 
     expect(filter('debug.log')).toBe(true);
     expect(filter('important.log')).toBe(false); // Negated!
+  });
+
+  // ============================================================================
+  // Complex Pattern Tests
+  // ============================================================================
+
+  describe('complex patterns', () => {
+    it('matches double-star glob patterns for any depth', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('**/*.log');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      // Should match .log files at any depth
+      expect(filter('app.log')).toBe(true);
+      expect(filter('logs/app.log')).toBe(true);
+      expect(filter('deep/nested/path/app.log')).toBe(true);
+      // Should not match non-.log files
+      expect(filter('app.ts')).toBe(false);
+      expect(filter('logs/readme.md')).toBe(false);
+    });
+
+    it('distinguishes directory patterns from file patterns', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      // build/ means only directories named build
+      // build means both files and directories named build
+      vi.mocked(readFileSync).mockReturnValue('build/\ntmp');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      // build/ pattern - matches directory contents
+      expect(filter('build/output.js')).toBe(true);
+      expect(filter('build/nested/file.js')).toBe(true);
+
+      // tmp pattern - matches both files and directories
+      expect(filter('tmp')).toBe(true);
+      expect(filter('tmp/cache.json')).toBe(true);
+    });
+
+    it('matches patterns with single-star wildcards', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('*.min.js\ntest-*.ts');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      expect(filter('bundle.min.js')).toBe(true);
+      expect(filter('vendor.min.js')).toBe(true);
+      expect(filter('test-utils.ts')).toBe(true);
+      expect(filter('test-helpers.ts')).toBe(true);
+      // Should not match
+      expect(filter('bundle.js')).toBe(false);
+      expect(filter('utils.ts')).toBe(false);
+    });
+
+    it('matches character class patterns', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('file[0-9].txt\n*.ba[ck]');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      expect(filter('file1.txt')).toBe(true);
+      expect(filter('file9.txt')).toBe(true);
+      expect(filter('data.bak')).toBe(true);
+      expect(filter('data.bac')).toBe(true);
+      // Should not match
+      expect(filter('fileA.txt')).toBe(false);
+      expect(filter('data.bat')).toBe(false);
+    });
+  });
+
+  // ============================================================================
+  // Advanced Negation Tests
+  // ============================================================================
+
+  describe('advanced negation', () => {
+    it('handles negation for files in ignored directories', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      // To un-ignore specific files inside an ignored directory,
+      // you must first un-ignore the directory path, then the files
+      vi.mocked(readFileSync).mockReturnValue('logs/*\n!logs/important.log');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      // logs/* ignores files in logs/
+      expect(filter('logs/debug.log')).toBe(true);
+      // But logs/important.log is negated
+      expect(filter('logs/important.log')).toBe(false);
+    });
+
+    it('handles negation with wildcards', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('*.test.ts\n!critical.test.ts');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      expect(filter('utils.test.ts')).toBe(true);
+      expect(filter('helpers.test.ts')).toBe(true);
+      expect(filter('critical.test.ts')).toBe(false); // Negated!
+    });
+
+    it('respects pattern order - later patterns override earlier', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      // First ignore all .env, then un-ignore .env.example
+      vi.mocked(readFileSync).mockReturnValue('.env*\n!.env.example');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      expect(filter('.env')).toBe(true);
+      expect(filter('.env.local')).toBe(true);
+      expect(filter('.env.production')).toBe(true);
+      expect(filter('.env.example')).toBe(false); // Un-ignored!
+    });
+
+    it('handles layered ignore and negation patterns', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      // Ignore all .env files, un-ignore .env.example, re-ignore .env.example.local
+      vi.mocked(readFileSync).mockReturnValue('.env*\n!.env.example\n.env.example.local');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      expect(filter('.env')).toBe(true); // Ignored by .env*
+      expect(filter('.env.local')).toBe(true); // Ignored by .env*
+      expect(filter('.env.example')).toBe(false); // Un-ignored
+      expect(filter('.env.example.local')).toBe(true); // Re-ignored
+    });
+  });
+
+  // ============================================================================
+  // Edge Cases
+  // ============================================================================
+
+  describe('edge cases', () => {
+    it('handles empty .gitignore file', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      // Nothing should be ignored
+      expect(filter('anything.ts')).toBe(false);
+      expect(filter('node_modules/pkg.js')).toBe(false);
+    });
+
+    it('handles .gitignore with only comments', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue(`# This is a comment
+# Another comment
+# All comments, no patterns
+`);
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      // Nothing should be ignored (all lines are comments)
+      expect(filter('anything.ts')).toBe(false);
+    });
+
+    it('handles .gitignore with only whitespace lines', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('   \n\t\n  \t  \n');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      expect(filter('file.ts')).toBe(false);
+    });
+
+    it('handles patterns with trailing spaces (trimmed)', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('node_modules   \ndist\t\t');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: false,
+      });
+
+      expect(filter('node_modules/pkg.js')).toBe(true);
+      expect(filter('dist/bundle.js')).toBe(true);
+    });
+
+    it('combines defaults, .gitignore, and additional patterns', () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFileSync).mockReturnValue('custom-ignore/');
+
+      const filter = createIgnoreFilter({
+        rootPath: '/project',
+        useDefaults: true, // Include defaults
+        additionalPatterns: ['*.custom'], // Add custom pattern
+      });
+
+      // Default pattern
+      expect(filter('node_modules/pkg.js')).toBe(true);
+      // .gitignore pattern
+      expect(filter('custom-ignore/file.txt')).toBe(true);
+      // Additional pattern
+      expect(filter('file.custom')).toBe(true);
+      // Not ignored
+      expect(filter('src/index.ts')).toBe(false);
+    });
+  });
+});
+
+// ============================================================================
+// createFastGlobIgnoreFilter Tests
+// ============================================================================
+
+describe('createFastGlobIgnoreFilter', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(existsSync).mockReturnValue(false);
+  });
+
+  it('inverts the ignore filter for fast-glob compatibility', () => {
+    const filter = createIgnoreFilter({
+      rootPath: '/project',
+      useDefaults: true,
+    });
+
+    const fastGlobFilter = createFastGlobIgnoreFilter(filter);
+
+    // fast-glob expects: true = INCLUDE, false = EXCLUDE
+    // Our filter returns: true = IGNORE (exclude)
+    // So fastGlobFilter inverts: ignored files return false
+    expect(fastGlobFilter({ path: 'node_modules/pkg.js' })).toBe(false); // Excluded
+    expect(fastGlobFilter({ path: 'src/index.ts' })).toBe(true); // Included
+  });
+
+  it('handles the path property from fast-glob entries', () => {
+    const filter = createIgnoreFilter({
+      rootPath: '/project',
+      additionalPatterns: ['*.log'],
+      useDefaults: false,
+    });
+
+    const fastGlobFilter = createFastGlobIgnoreFilter(filter);
+
+    // fast-glob passes entries with { path: string }
+    expect(fastGlobFilter({ path: 'debug.log' })).toBe(false); // Excluded
+    expect(fastGlobFilter({ path: 'app.ts' })).toBe(true); // Included
+  });
+
+  it('works with nested paths', () => {
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue('logs/');
+
+    const filter = createIgnoreFilter({
+      rootPath: '/project',
+      useDefaults: false,
+    });
+
+    const fastGlobFilter = createFastGlobIgnoreFilter(filter);
+
+    expect(fastGlobFilter({ path: 'logs/app.log' })).toBe(false); // Excluded
+    expect(fastGlobFilter({ path: 'src/utils.ts' })).toBe(true); // Included
   });
 });
 
