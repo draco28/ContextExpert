@@ -2,7 +2,7 @@
  * Tests for gitignore pattern handling
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import {
   loadGitignoreFile,

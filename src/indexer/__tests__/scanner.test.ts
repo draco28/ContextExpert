@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolve, join } from 'node:path';
+import { resolve, join, sep } from 'node:path';
 import {
   mkdtempSync,
   writeFileSync,
@@ -152,7 +152,7 @@ describe('scanDirectory', () => {
     const result = await scanDirectory(tempDir);
 
     expect(result.files).toHaveLength(1);
-    const file = result.files[0];
+    const file = result.files[0]!;
 
     expect(file.extension).toBe('ts');
     expect(file.language).toBe('typescript');
@@ -451,7 +451,9 @@ describe('scanDirectory', () => {
       // fast-glob with dot: false should exclude dotfiles
       const relativePaths = result.files.map((f) => f.relativePath);
       expect(relativePaths).toContain('regular.ts');
-      // Dotfiles are excluded by fast-glob's dot: false option
+      // Explicit assertions that dotfiles are NOT included
+      expect(relativePaths).not.toContain('.hidden.ts');
+      expect(relativePaths).not.toContain(join('.config', 'settings.ts'));
     });
 
     it('handles deeply nested directories', async () => {
@@ -462,10 +464,8 @@ describe('scanDirectory', () => {
 
       expect(result.files).toHaveLength(1);
       // The relative path uses the OS path separator
-      const expectedPath = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'deep.ts'].join(
-        join('a', 'b').charAt(1) // Extract the path separator used by join()
-      );
-      expect(result.files[0].relativePath).toBe(expectedPath);
+      const expectedPath = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'deep.ts'].join(sep);
+      expect(result.files[0]!.relativePath).toBe(expectedPath);
     });
 
     it('handles files with spaces in names', async () => {
