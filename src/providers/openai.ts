@@ -28,6 +28,13 @@ export interface OpenAIProviderOptions {
   model?: string;
 
   /**
+   * Explicit API key to use.
+   * If provided, skips environment variable lookup (OPENAI_API_KEY).
+   * Used for stored provider configurations and OpenAI-compatible APIs.
+   */
+  apiKey?: string;
+
+  /**
    * Optional organization ID for API requests.
    * Required for some enterprise accounts.
    */
@@ -39,6 +46,7 @@ export interface OpenAIProviderOptions {
    * - OpenRouter: 'https://openrouter.ai/api/v1'
    * - Azure OpenAI: 'https://{resource}.openai.azure.com/...'
    * - Local proxies
+   * - OpenAI-compatible APIs (e.g., Z.AI)
    */
   baseURL?: string;
 
@@ -116,14 +124,20 @@ export const DEFAULT_OPENAI_MODEL = 'gpt-4o';
 export async function createOpenAIProvider(
   options: OpenAIProviderOptions = {}
 ): Promise<OpenAIProviderResult> {
-  // 1. Validate API key format and presence
-  const validation = validateOpenAIKey();
-  if (!validation.valid) {
-    throw new Error(`${validation.error}\n\n${validation.setupInstructions}`);
-  }
+  let apiKey: string;
 
-  // 2. Get API key securely (skip redundant validation since we just validated)
-  const apiKey = getProviderKeyUnsafe('openai');
+  // 1. Get API key - either from explicit option or environment
+  if (options.apiKey) {
+    // Use explicitly provided key (for stored provider configs)
+    apiKey = options.apiKey;
+  } else {
+    // Validate and get from environment variable
+    const validation = validateOpenAIKey();
+    if (!validation.valid) {
+      throw new Error(`${validation.error}\n\n${validation.setupInstructions}`);
+    }
+    apiKey = getProviderKeyUnsafe('openai');
+  }
 
   // 3. Determine model to use
   const model = options.model ?? DEFAULT_OPENAI_MODEL;
