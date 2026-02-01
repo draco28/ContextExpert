@@ -1,8 +1,8 @@
 # Context Expert
 
-[![npm version](https://img.shields.io/npm/v/context-expert.svg)](https://www.npmjs.com/package/context-expert)
+[![npm version](https://img.shields.io/npm/v/@contextexpert/cli.svg)](https://www.npmjs.com/package/@contextexpert/cli)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/node/v/context-expert.svg)](https://nodejs.org)
+[![Node.js Version](https://img.shields.io/node/v/@contextexpert/cli.svg)](https://nodejs.org)
 
 A cross-project context agent CLI for unified semantic search and RAG-powered Q&A across multiple codebases.
 
@@ -20,7 +20,7 @@ A cross-project context agent CLI for unified semantic search and RAG-powered Q&
 ## Installation
 
 ```bash
-npm install -g context-expert
+npm install -g @contextexpert/cli
 ```
 
 **Requirements:** Node.js 20.0.0 or higher
@@ -243,8 +243,8 @@ ctx config set default_model llama3.2
 
 ```bash
 # Clone and install
-git clone https://github.com/your-username/context-expert.git
-cd context-expert
+git clone https://github.com/draco28/ContextExpert.git
+cd ContextExpert
 pnpm install
 
 # Build
@@ -284,5 +284,5 @@ Contributions are welcome! Please:
 
 ## License
 
-[MIT](LICENSE) © 2025
+[MIT](LICENSE) © 2026
 
