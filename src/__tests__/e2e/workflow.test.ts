@@ -196,7 +196,7 @@ import {
   DEFAULT_MOCK_RESPONSES,
   verifyCitations,
   extractCitationReferences,
-  captureStdout,
+  withStdoutCapture,
 } from './setup.js';
 
 // ============================================================================
@@ -394,12 +394,19 @@ describe('E2E Workflow Tests', () => {
 
   afterAll(() => {
     resetAll();
+
     // Clean up temp directory
     try {
       rmSync(getTestRoot(), { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors (Windows file locking, etc.)
     }
+
+    // Clean up global variables to prevent leaks between test files
+    // These are set by the vi.mock factory for paths.js
+    delete (globalThis as Record<string, unknown>).__e2eTestRoot;
+    delete (globalThis as Record<string, unknown>).__e2eDataDir;
+    delete (globalThis as Record<string, unknown>).__e2eDbPath;
   });
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -533,42 +540,30 @@ describe('E2E Workflow Tests', () => {
 
   describe('Ask Phase', () => {
     it('generates answer using RAG context', async () => {
-      const capture = captureStdout();
-
-      try {
-        const ctx = createMockContext();
-        await runAskCommand(
+      const ctx = createMockContext();
+      const { output } = await withStdoutCapture(() =>
+        runAskCommand(
           ['How does authentication work?', '--project', PROJECT_NAME],
           ctx
-        );
+        )
+      );
 
-        const output = capture.getContent();
-
-        // Should contain authentication-related content from mock LLM
-        expect(output).toMatch(/authenticate|auth\.ts|password/i);
-      } finally {
-        capture.restore();
-      }
+      // Should contain authentication-related content from mock LLM
+      expect(output).toMatch(/authenticate|auth\.ts|password/i);
     });
 
     it('includes citations in response', async () => {
-      const capture = captureStdout();
-
-      try {
-        const ctx = createMockContext();
-        await runAskCommand(
+      const ctx = createMockContext();
+      const { output } = await withStdoutCapture(() =>
+        runAskCommand(
           ['How does authentication work?', '--project', PROJECT_NAME],
           ctx
-        );
+        )
+      );
 
-        const output = capture.getContent();
-
-        // Mock response includes [1], [2] citations
-        const citations = extractCitationReferences(output);
-        expect(citations.length).toBeGreaterThan(0);
-      } finally {
-        capture.restore();
-      }
+      // Mock response includes [1], [2] citations
+      const citations = extractCitationReferences(output);
+      expect(citations.length).toBeGreaterThan(0);
     });
 
     it('returns JSON output with sources when json option is set', async () => {
@@ -661,19 +656,14 @@ describe('E2E Workflow Tests', () => {
       expect(searchCtx.log).toHaveBeenCalled();
 
       // Step 3: Ask
-      const capture = captureStdout();
-      try {
-        const askCtx = createMockContext();
-        await runAskCommand(
+      const askCtx = createMockContext();
+      const { output } = await withStdoutCapture(() =>
+        runAskCommand(
           ['How are passwords handled?', '--project', workflowProjectName],
           askCtx
-        );
-
-        const output = capture.getContent();
-        expect(output).toMatch(/password|hash/i);
-      } finally {
-        capture.restore();
-      }
+        )
+      );
+      expect(output).toMatch(/password|hash/i);
     });
 
     it('handles multiple questions in sequence', async () => {
@@ -685,17 +675,13 @@ describe('E2E Workflow Tests', () => {
       ];
 
       for (const question of questions) {
-        const capture = captureStdout();
-        try {
-          const ctx = createMockContext();
-          await runAskCommand([question, '--project', PROJECT_NAME], ctx);
+        const ctx = createMockContext();
+        const { output } = await withStdoutCapture(() =>
+          runAskCommand([question, '--project', PROJECT_NAME], ctx)
+        );
 
-          const output = capture.getContent();
-          // Each question should produce some output
-          expect(output.length).toBeGreaterThan(0);
-        } finally {
-          capture.restore();
-        }
+        // Each question should produce some output
+        expect(output.length).toBeGreaterThan(0);
       }
     });
   });
@@ -704,6 +690,14 @@ describe('E2E Workflow Tests', () => {
   // Suite 5: Citation Verification
   // ══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * Unit tests for the citation verification helpers in setup.ts.
+   *
+   * Note: These are technically unit tests, but they're placed here because:
+   * 1. They test the E2E setup helpers (extractCitationReferences, verifyCitations)
+   * 2. They're closely related to the E2E ask tests that use these helpers
+   * 3. Keeping them together aids discoverability
+   */
   describe('Citation Verification', () => {
     it('extractCitationReferences parses [N] patterns', () => {
       const text = 'See [1] for auth, [2] for tokens. Also [1] again.';

@@ -19,6 +19,21 @@ import type { RAGSource } from '../../agent/types.js';
 // Re-export from Integration Setup
 // ============================================================================
 
+/**
+ * Re-exports from the integration test setup.
+ *
+ * Design Note: E2E tests intentionally build on integration test utilities
+ * rather than duplicating them. This creates a layered testing architecture:
+ *
+ *   Unit Tests → Integration Tests → E2E Tests
+ *                      ↑                 ↑
+ *                      └── setup.ts ─────┘
+ *
+ * Benefits:
+ * - DRY: Sample project fixtures defined once
+ * - Consistency: Same mock embedding provider across test layers
+ * - Maintainability: Updates propagate automatically
+ */
 export {
   createSampleProject,
   createMockEmbeddingProvider,
@@ -358,18 +373,25 @@ export function verifyCitations(
 /**
  * Capture console output during test execution.
  *
+ * @internal Prefer using `withConsoleCapture()` which guarantees cleanup.
+ *
  * Useful for verifying CLI output without actually printing to terminal.
  * Returns a cleanup function to restore original behavior.
+ *
+ * ⚠️ WARNING: If a test throws before calling restore(), the mock persists.
+ * Use `withConsoleCapture()` instead for guaranteed cleanup.
  *
  * @returns Object with captured lines array and restore function
  *
  * @example
  * ```typescript
  * const capture = captureConsoleOutput();
- * console.log('Hello');
- * console.log('World');
- * capture.restore();
- *
+ * try {
+ *   console.log('Hello');
+ *   console.log('World');
+ * } finally {
+ *   capture.restore();
+ * }
  * expect(capture.lines).toEqual(['Hello', 'World']);
  * ```
  */
@@ -395,8 +417,13 @@ export function captureConsoleOutput(): {
 /**
  * Capture stdout.write output during test execution.
  *
+ * @internal Prefer using `withStdoutCapture()` which guarantees cleanup.
+ *
  * Used for streaming output where console.log isn't used.
  * The ask command uses process.stdout.write for streaming.
+ *
+ * ⚠️ WARNING: If a test throws before calling restore(), the mock persists.
+ * Use `withStdoutCapture()` instead for guaranteed cleanup.
  *
  * @returns Object with captured content string and restore function
  */
@@ -407,21 +434,30 @@ export function captureStdout(): {
   const chunks: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
 
-  process.stdout.write = ((
+  // Mock with proper type handling for all overload signatures
+  const mockWrite: typeof process.stdout.write = function (
     chunk: string | Uint8Array,
     encodingOrCallback?: BufferEncoding | ((err?: Error) => void),
     callback?: (err?: Error) => void
-  ): boolean => {
+  ): boolean {
+    // Handle the chunk based on type
     if (typeof chunk === 'string') {
       chunks.push(chunk);
-    } else {
-      chunks.push(chunk.toString());
+    } else if (chunk instanceof Uint8Array) {
+      // Apply encoding if provided as string, otherwise default to utf-8
+      const encoding =
+        typeof encodingOrCallback === 'string' ? encodingOrCallback : 'utf-8';
+      chunks.push(Buffer.from(chunk).toString(encoding as BufferEncoding));
     }
-    // Call the callback if provided
-    const cb = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback;
+
+    // Call the appropriate callback
+    const cb =
+      typeof encodingOrCallback === 'function' ? encodingOrCallback : callback;
     if (cb) cb();
     return true;
-  }) as typeof process.stdout.write;
+  } as typeof process.stdout.write;
+
+  process.stdout.write = mockWrite;
 
   return {
     getContent: () => chunks.join(''),
@@ -429,4 +465,66 @@ export function captureStdout(): {
       process.stdout.write = originalWrite;
     },
   };
+}
+
+// ============================================================================
+// Safe Capture Helpers (PREFERRED API)
+// ============================================================================
+
+/**
+ * Execute a function while capturing stdout, with guaranteed cleanup.
+ *
+ * This is the PREFERRED API for tests - it wraps capture/restore in try/finally
+ * to ensure cleanup happens even if the test throws an exception.
+ *
+ * @param fn - Function to execute while capturing stdout
+ * @returns Object with the function result and captured output
+ *
+ * @example
+ * ```typescript
+ * const { output } = await withStdoutCapture(async () => {
+ *   await runAskCommand(['How does auth work?', '--project', 'my-project'], ctx);
+ * });
+ * expect(output).toMatch(/authenticate/i);
+ * ```
+ */
+export async function withStdoutCapture<T>(
+  fn: () => T | Promise<T>
+): Promise<{ result: T; output: string }> {
+  const capture = captureStdout();
+  try {
+    const result = await fn();
+    return { result, output: capture.getContent() };
+  } finally {
+    capture.restore();
+  }
+}
+
+/**
+ * Execute a function while capturing console.log, with guaranteed cleanup.
+ *
+ * This is the PREFERRED API for tests - it wraps capture/restore in try/finally
+ * to ensure cleanup happens even if the test throws an exception.
+ *
+ * @param fn - Function to execute while capturing console output
+ * @returns Object with the function result and captured lines
+ *
+ * @example
+ * ```typescript
+ * const { lines } = await withConsoleCapture(async () => {
+ *   await runSearchCommand(['query', '--project', 'my-project'], ctx);
+ * });
+ * expect(lines.some(l => l.includes('results'))).toBe(true);
+ * ```
+ */
+export async function withConsoleCapture<T>(
+  fn: () => T | Promise<T>
+): Promise<{ result: T; lines: string[] }> {
+  const capture = captureConsoleOutput();
+  try {
+    const result = await fn();
+    return { result, lines: capture.lines };
+  } finally {
+    capture.restore();
+  }
 }
