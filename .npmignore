@@ -1,0 +1,41 @@
+# Source files (use dist/ instead)
+src/
+*.ts
+!*.d.ts
+tsconfig.json
+tsup.config.ts
+
+# Test files
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+vitest.config.ts
+coverage/
+
+# Development files
+.github/
+.claude/
+.opencode/
+.env
+.env.*
+!.env.example
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Build artifacts
+node_modules/
+*.log
+*.tgz
+
+# Project docs (not for npm users)
+SPEC.md
+discussion_file.md
+docs/
+pnpm-lock.yaml
+pnpm-workspace.yaml

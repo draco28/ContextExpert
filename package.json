@@ -1,5 +1,5 @@
 {
-  "name": "context-expert",
+  "name": "@contextexpert/cli",
   "version": "0.1.0",
   "description": "Cross-project context agent CLI - unified search and Q&A across codebases",
   "type": "module",
@@ -22,7 +22,8 @@
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "pnpm run build && pnpm run test"
   },
   "keywords": [
     "cli",
@@ -32,8 +33,26 @@
     "ai",
     "codebase"
   ],
-  "author": "",
+  "author": "draco",
   "license": "MIT",
+  "homepage": "https://github.com/draco28/ContextExpert#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/draco28/ContextExpert.git"
+  },
+  "bugs": {
+    "url": "https://github.com/draco28/ContextExpert/issues"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "engines": {
     "node": ">=20.0.0"
   },
