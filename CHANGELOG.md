@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tab completion support for bash/zsh/fish shells
 - Colorized terminal output with progress spinners
 - Comprehensive error messages with actionable suggestions
-- TOML-based configuration (`context-expert.toml`)
+- TOML-based configuration (`~/.ctx/config.toml`)
 
 #### Testing & Quality
 - 42 test files with vitest

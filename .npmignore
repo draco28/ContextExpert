@@ -1,7 +1,5 @@
 # Source files (use dist/ instead)
 src/
-*.ts
-!*.d.ts
 tsconfig.json
 tsup.config.ts
 

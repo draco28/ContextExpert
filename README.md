@@ -284,5 +284,5 @@ Contributions are welcome! Please:
 
 ## License
 
-[MIT](LICENSE) © 2025
+[MIT](LICENSE) © 2026
 
