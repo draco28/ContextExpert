@@ -32,7 +32,7 @@ import {
 import { getDb, runMigrations } from '../../database/index.js';
 import { loadConfig, type Config } from '../../config/loader.js';
 import { createRAGEngine, type ContextExpertRAGEngine } from '../../agent/rag-engine.js';
-import { RAGEngineError, RAGErrorCodes } from '../../agent/types.js';
+import { RAGEngineError, RAGErrorCodes, type RAGSource } from '../../agent/types.js';
 import { formatCitations } from '../../agent/citations.js';
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
@@ -511,13 +511,7 @@ async function handleQuestion(
   ctx: CommandContext
 ): Promise<void> {
   let ragContext = '';
-  let sources: Array<{
-    id: number;
-    filePath: string;
-    startLine?: number;
-    endLine?: number;
-    score: number;
-  }> = [];
+  let sources: RAGSource[] = [];
 
   // 1. RAG search if focused on a project
   if (state.ragEngine && state.currentProject) {
@@ -742,7 +736,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       // 1. Load config
       // ─────────────────────────────────────────────────────────────────────
       const config = loadConfig();
-      ctx.debug(`LLM: ${config.llm?.model ?? 'default'}`);
+      ctx.debug(`LLM: ${config.default_model ?? 'default'}`);
 
       // ─────────────────────────────────────────────────────────────────────
       // 2. Resolve initial project (optional)

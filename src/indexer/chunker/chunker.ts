@@ -39,7 +39,6 @@ import type {
 import {
   extractCodeSegments,
   extractMarkdownSegments,
-  isLanguageSupported,
   isMarkdown,
 } from './extractors/index.js';
 import {

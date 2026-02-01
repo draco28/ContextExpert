@@ -90,8 +90,7 @@ function getProjects(): Project[] {
   } catch (error) {
     throw new DatabaseError(
       'Failed to query projects from database',
-      error instanceof Error ? error.message : 'Unknown error',
-      'Ensure the database is properly initialized'
+      error instanceof Error ? error : undefined
     );
   }
 }

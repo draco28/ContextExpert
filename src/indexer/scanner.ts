@@ -11,7 +11,6 @@ import fg from 'fast-glob';
 
 import {
   createIgnoreFilter,
-  createFastGlobIgnoreFilter,
   isBinaryFile,
 } from './ignore.js';
 import {
@@ -25,6 +24,9 @@ import {
   type ScanResult,
   type ScanStats,
 } from './types.js';
+
+// Re-export types for consumers
+export type { ScanResult, ScanStats };
 
 /**
  * Scan a directory for files to index.
@@ -71,9 +73,6 @@ export async function scanDirectory(
     additionalPatterns: options.additionalIgnorePatterns,
     useDefaults: true,
   });
-
-  // Create fast-glob compatible filter
-  const fastGlobFilter = createFastGlobIgnoreFilter(ignoreFilter);
 
   // Track statistics
   const stats: ScanStats = {

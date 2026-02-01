@@ -16,8 +16,9 @@ import { DEFAULT_CONFIG, CONFIG_TEMPLATE } from './defaults.js';
 import { ConfigError } from '../errors/index.js';
 import { getCtxDir, getConfigPath } from './paths.js';
 
-// Re-export path functions for backwards compatibility
+// Re-export path functions and types for backwards compatibility
 export { getCtxDir, getConfigPath };
+export type { Config, PartialConfig };
 
 /**
  * Ensure the ~/.ctx directory exists

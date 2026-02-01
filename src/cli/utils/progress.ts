@@ -279,7 +279,6 @@ export class ProgressReporter {
       });
     } else if (this.options.isInteractive && this.spinner) {
       // Show success with final count
-      const label = STAGE_LABELS[stats.stage];
       this.spinner.succeed(
         `${stats.processed.toLocaleString()} ${this.getStageUnit(stats.stage)}`
       );

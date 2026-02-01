@@ -208,7 +208,6 @@ export function createSearchCommand(
       // ─────────────────────────────────────────────────────────────────────
       const projects = resolveProjects(cmdOptions.project);
       const projectNames = projects.map((p) => p.name);
-      const projectIds = projects.map((p) => p.id);
       const isMultiProject = projects.length > 1;
 
       ctx.debug(`Searching ${projects.length} project(s): ${projectNames.join(', ')}`);
@@ -218,7 +217,7 @@ export function createSearchCommand(
         ctx.log(
           chalk.yellow(
             `Warning: Multi-project search not yet supported. ` +
-              `Searching only "${projects[0].name}".`
+              `Searching only "${projects[0]!.name}".`
           )
         );
       }
@@ -248,7 +247,7 @@ export function createSearchCommand(
       ctx.debug(`Reranking: ${shouldRerank ? 'enabled' : 'disabled'}`);
 
       const fusionService = createFusionService(
-        projects[0].id,
+        projects[0]!.id,
         embeddingProvider,
         { ...config.search, rerank: shouldRerank },
         { denseOptions: { dimensions } }

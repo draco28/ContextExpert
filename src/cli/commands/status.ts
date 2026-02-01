@@ -10,7 +10,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { statSync, existsSync } from 'node:fs';
 import type { CommandContext } from '../types.js';
-import { getDb, runMigrations, getDbPath, getCtxDir } from '../../database/index.js';
+import { getDb, runMigrations, getDbPath } from '../../database/index.js';
 import { loadConfig, getConfigPath } from '../../config/loader.js';
 import { DatabaseError } from '../../errors/index.js';
 
@@ -78,8 +78,7 @@ function getDbStats(): DbStats {
   } catch (error) {
     throw new DatabaseError(
       'Failed to query database statistics',
-      error instanceof Error ? error.message : 'Unknown error',
-      'Ensure the database is properly initialized'
+      error instanceof Error ? error : undefined
     );
   }
 }

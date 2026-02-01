@@ -79,7 +79,6 @@ import {
   type RAGEngineOptions,
   type RAGSearchResult,
   type RAGSource,
-  type OrderingStrategy,
 } from './types.js';
 
 // ============================================================================
@@ -349,7 +348,8 @@ export class ContextExpertRAGEngine {
    */
   private toRAGSource(source: SourceAttribution, index: number): RAGSource {
     // Extract from metadata (we put it there in adapter)
-    const metadata = source.metadata ?? {};
+    // Note: metadata is added by our adapter but not in SDK type definition
+    const metadata = (source as SourceAttribution & { metadata?: Record<string, unknown> }).metadata ?? {};
 
     return {
       index: index + 1, // 1-indexed for human-readable citations

@@ -134,7 +134,8 @@ export class SearchService {
     const results = await this.retriever!.retrieve(query, {
       topK,
       minScore,
-      filter: Object.keys(filter).length > 0 ? filter : undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      filter: Object.keys(filter).length > 0 ? (filter as any) : undefined,
     });
 
     // Convert to our result format using shared utility

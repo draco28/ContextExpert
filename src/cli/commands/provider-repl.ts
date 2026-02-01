@@ -318,8 +318,8 @@ async function handleProviderAdd(
 
       let gotResponse = false;
       for await (const chunk of stream) {
-        // Accept text content
-        if ((chunk.type === 'text' || chunk.type === 'content') && chunk.content) {
+        // Accept text content (check for content property regardless of type)
+        if ('content' in chunk && chunk.content) {
           gotResponse = true;
           break;
         }
@@ -525,8 +525,8 @@ async function handleProviderTest(
 
     let gotResponse = false;
     for await (const chunk of stream) {
-      // Accept text content
-      if ((chunk.type === 'text' || chunk.type === 'content') && chunk.content) {
+      // Accept text content (check for content property regardless of type)
+      if ('content' in chunk && chunk.content) {
         gotResponse = true;
         break;
       }

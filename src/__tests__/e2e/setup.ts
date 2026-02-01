@@ -15,6 +15,9 @@
 import type { ChatMessage, TokenUsage, StreamChunk } from '@contextaisdk/core';
 import type { RAGSource } from '../../agent/types.js';
 
+// Re-export types needed by test files
+export type { RAGSource };
+
 // ============================================================================
 // Re-export from Integration Setup
 // ============================================================================
@@ -229,7 +232,12 @@ export function createMockLLMProvider(config: MockLLMConfig): MockLLMProvider {
   const extractQuestion = (messages: ChatMessage[]): string => {
     const userMessages = messages.filter((m) => m.role === 'user');
     const lastUserMessage = userMessages[userMessages.length - 1];
-    return lastUserMessage?.content ?? '';
+    const content = lastUserMessage?.content;
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    // Handle MessageContent[] - extract text from text parts
+    const textParts = content.filter((p) => p.type === 'text');
+    return textParts.map((p) => ('text' in p ? p.text : '')).join('\n');
   };
 
   return {

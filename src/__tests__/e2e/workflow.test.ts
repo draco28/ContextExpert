@@ -174,7 +174,7 @@ vi.mock('ora', () => ({
 // Imports (after mocks)
 // ============================================================================
 
-import { runMigrations, getDb, resetDatabase, closeDb } from '../../database/index.js';
+import { runMigrations, resetDatabase, closeDb } from '../../database/index.js';
 import { resetVectorStoreManager } from '../../search/store.js';
 import { resetBM25StoreManager } from '../../search/bm25-store.js';
 import * as embedder from '../../indexer/embedder/index.js';
@@ -197,6 +197,7 @@ import {
   verifyCitations,
   extractCitationReferences,
   withStdoutCapture,
+  type RAGSource,
 } from './setup.js';
 
 // ============================================================================
@@ -240,6 +241,7 @@ function createMockContext(options: { verbose?: boolean; json?: boolean } = {}):
     },
     log: vi.fn(),
     debug: vi.fn(),
+    warn: vi.fn(),
     error: vi.fn(),
   };
 }
@@ -267,7 +269,7 @@ function setupEmbedderMock(): void {
   vi.mocked(embedder.createEmbeddingProvider).mockResolvedValue(mockResult);
   vi.mocked(embedderProvider.createEmbeddingProvider).mockResolvedValue(mockResult);
 
-  vi.mocked(embedder.embedChunks).mockImplementation(async (chunks) => {
+  vi.mocked(embedder.embedChunks).mockImplementation(async (chunks, _provider, _options) => {
     const results = await mockProvider.embedBatch(chunks.map((c) => c.content));
     return chunks.map((chunk, i) => ({
       ...chunk,
@@ -289,8 +291,8 @@ function setupLLMMock(): void {
 
   vi.mocked(llmProvider.createLLMProvider).mockResolvedValue({
     provider: mockLLM,
-    name: 'mock',
-    model: 'mock-model',
+    name: 'anthropic',
+    model: 'claude-sonnet-4-20250514',
   });
 }
 
@@ -526,9 +528,6 @@ describe('E2E Workflow Tests', () => {
       await runSearchCommand(['xyznonexistentquery123', '--project', PROJECT_NAME], ctx);
 
       // Should not throw, and should indicate no results
-      const logCalls = vi.mocked(ctx.log).mock.calls;
-      const allOutput = logCalls.map((call) => call[0]).join('\n');
-
       // Either shows "no results" message or empty results
       expect(ctx.error).not.toHaveBeenCalled();
     });

@@ -181,10 +181,10 @@ export function createIndexCommand(
           onStageStart: (stage, total) => {
             reporter.startStage(stage, total);
           },
-          onProgress: (stage, processed, total, currentFile) => {
+          onProgress: (_stage, processed, _total, currentFile) => {
             reporter.updateProgress(processed, currentFile);
           },
-          onStageComplete: (stage, stats) => {
+          onStageComplete: (_stage, stats) => {
             reporter.completeStage(stats);
           },
           onWarning: (message, context) => {
