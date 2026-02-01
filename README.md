@@ -8,7 +8,7 @@ A cross-project context agent CLI for unified semantic search and RAG-powered Q&
 
 ## Features
 
-- **Cross-project search** — Query across multiple indexed codebases simultaneously
+- **Cross-project indexing** — Index multiple codebases, search by project
 - **RAG-powered Q&A** — Ask natural language questions with cited source references
 - **Interactive chat** — Multi-turn REPL with conversation context and project focus
 - **Hybrid search** — Combines dense vectors + BM25 with Reciprocal Rank Fusion
@@ -85,7 +85,7 @@ ctx search "authentication" --top 20 --rerank
 | Option | Description |
 |--------|-------------|
 | `--project, -p` | Limit search to specific project |
-| `--top, -t` | Number of results (default: 10) |
+| `--top, -k` | Number of results (default: 10) |
 | `--rerank, -r` | Apply BGE cross-encoder reranking |
 
 ### `ctx ask <question>`
@@ -101,7 +101,7 @@ ctx ask "Explain the caching strategy" --top-k 15 --json
 | Option | Description |
 |--------|-------------|
 | `--project, -p` | Limit context to specific project |
-| `--top-k, -k` | Number of chunks to retrieve (default: 10) |
+| `--top-k, -k` | Number of chunks to retrieve (default: 5) |
 | `--json` | Output structured JSON response |
 
 ### `ctx chat`
@@ -121,9 +121,8 @@ ctx chat
 | `/unfocus` | Search all projects again |
 | `/projects` | List indexed projects |
 | `/clear` | Clear conversation history |
-| `/export` | Export conversation to markdown |
-| `/model <name>` | Switch LLM model |
-| `/verbose` | Toggle debug output |
+| `/provider <name>` | Switch LLM provider |
+| `/exit` | Exit the chat session |
 
 ### `ctx config`
 
@@ -150,8 +149,13 @@ Displays database size, total chunks, project count, and embedding model info.
 Delete an indexed project and all its data.
 
 ```bash
-ctx remove old-project
+ctx remove old-project          # Shows confirmation prompt
+ctx remove old-project --force  # Skip confirmation
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--force, -f` | Skip confirmation prompt |
 
 ## Configuration
 
@@ -190,10 +194,13 @@ batch_size = 32
 top_k = 10
 rerank = true  # Use BGE cross-encoder
 
-# RAG settings
+# RAG settings (optional - these are defaults)
 [rag]
-max_tokens = 4000
-final_k = 5
+max_tokens = 4000       # Max tokens for LLM context
+retrieve_k = 20         # Chunks to retrieve before reranking
+final_k = 5             # Chunks to include after reranking
+enhance_query = false   # Use LLM to enhance search query
+ordering = "sandwich"   # Context ordering: sandwich, chronological, relevance
 ```
 
 ## Providers
