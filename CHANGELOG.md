@@ -43,5 +43,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No incremental reranking** - Full rerank on each query
 - **Memory usage** - Large codebases may require significant RAM during indexing
 
-[unreleased]: https://github.com/dracodev/context-expert/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/dracodev/context-expert/releases/tag/v0.1.0
+[unreleased]: https://github.com/draco28/ContextExpert/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/draco28/ContextExpert/releases/tag/v0.1.0
