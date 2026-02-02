@@ -275,3 +275,104 @@ export interface FormattedResultJSON {
   /** Project ID (included when showProject option is true) */
   projectId?: string;
 }
+
+// ============================================================================
+// Multi-Project Search Types
+// ============================================================================
+
+/**
+ * Options for loading multiple project stores.
+ *
+ * Used with MultiProjectVectorStoreManager to load vector stores
+ * for cross-project search.
+ */
+export interface MultiProjectLoadOptions {
+  /** Project IDs to load */
+  projectIds: string[];
+  /** Embedding dimensions (must be consistent across all projects) */
+  dimensions: number;
+  /** Use HNSW index for O(log n) search (default: true) */
+  useHNSW?: boolean;
+  /** HNSW index tuning parameters */
+  hnswConfig?: SearchServiceOptions['hnswConfig'];
+}
+
+/**
+ * Progress during multi-project store loading.
+ *
+ * Extends IndexBuildProgress with project context so UI can show
+ * "Loading project 2/5: my-project (150/500 chunks)".
+ */
+export interface MultiProjectLoadProgress extends IndexBuildProgress {
+  /** ID of the project currently being loaded */
+  projectId: string;
+  /** Human-readable project name */
+  projectName: string;
+  /** 1-indexed position in the load queue */
+  projectIndex: number;
+  /** Total number of projects to load */
+  totalProjects: number;
+}
+
+/**
+ * Search result with project attribution.
+ *
+ * Extends SearchResultWithContext to include which project the result
+ * came from. Essential for cross-project search display.
+ */
+export interface MultiProjectSearchResult extends SearchResultWithContext {
+  /** Project ID this result came from */
+  projectId: string;
+  /** Human-readable project name */
+  projectName: string;
+}
+
+/**
+ * Options for multi-project search.
+ *
+ * Extends single-project search options with parameters for
+ * cross-project result merging.
+ */
+export interface MultiProjectSearchOptions {
+  /**
+   * Number of results to retrieve per project before merging (default: 20).
+   *
+   * Over-fetching improves RRF quality - documents that appear in multiple
+   * projects' results get boosted in the final ranking.
+   */
+  topKPerProject?: number;
+  /** Final number of results after RRF merge (default: 10) */
+  topK?: number;
+  /** Minimum similarity score threshold (0-1 for cosine) */
+  minScore?: number;
+  /** Filter by content type */
+  fileType?: 'code' | 'docs' | 'config';
+  /** Filter by programming language */
+  language?: string;
+}
+
+/**
+ * Result of embedding model validation across projects.
+ *
+ * All projects in a cross-project search must use the same embedding model
+ * and dimensions. This ensures vectors are comparable.
+ */
+export interface EmbeddingValidation {
+  /** Whether all projects are compatible */
+  valid: boolean;
+  /**
+   * Details of mismatched projects (only present if valid=false).
+   *
+   * Each entry describes a project that differs from the reference.
+   */
+  errors?: Array<{
+    projectId: string;
+    projectName: string;
+    embeddingModel: string | null;
+    embeddingDimensions: number;
+  }>;
+  /** Expected dimensions based on first project */
+  expectedDimensions?: number;
+  /** Expected model name based on first project */
+  expectedModel?: string | null;
+}
