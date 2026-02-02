@@ -393,3 +393,58 @@ export interface MultiProjectBM25LoadOptions {
   /** BM25 configuration (optional, uses defaults if not provided) */
   bm25Config?: BM25Config;
 }
+
+// ============================================================================
+// Multi-Project Fusion Search Types
+// ============================================================================
+
+/**
+ * Options for loading multiple project stores for fusion search.
+ *
+ * Combines requirements from both vector (dimensions) and BM25 (config) loading.
+ * Essentially a union of MultiProjectLoadOptions and MultiProjectBM25LoadOptions.
+ */
+export interface MultiProjectFusionLoadOptions {
+  /** Project IDs to load */
+  projectIds: string[];
+  /** Embedding dimensions (must be consistent across all projects) */
+  dimensions: number;
+  /** Use HNSW index for O(log n) search (default: true) */
+  useHNSW?: boolean;
+  /** HNSW index tuning parameters */
+  hnswConfig?: SearchServiceOptions['hnswConfig'];
+  /** BM25 configuration (optional, uses defaults if not provided) */
+  bm25Config?: BM25Config;
+}
+
+/**
+ * Configuration for multi-project fusion service.
+ *
+ * Controls RRF fusion behavior and optional reranking.
+ */
+export interface MultiProjectFusionConfig {
+  /**
+   * RRF configuration for merging dense vs BM25 results.
+   * Uses DEFAULT_RRF_K (60) if not specified.
+   */
+  fusionConfig?: Partial<FusionConfig>;
+  /** Enable cross-encoder reranking after fusion (default: false) */
+  rerank?: boolean;
+  /** Reranker configuration (only used if rerank is true) */
+  rerankConfig?: RerankConfig;
+}
+
+/**
+ * Options for multi-project fusion search queries.
+ *
+ * Extends MultiProjectSearchOptions - same filtering capabilities,
+ * but used in the context of hybrid (dense + BM25) search.
+ */
+export interface MultiProjectFusionSearchOptions extends MultiProjectSearchOptions {
+  // Inherits all options from MultiProjectSearchOptions:
+  // - topKPerProject: Results per project before RRF (default: 20)
+  // - topK: Final results after all merging (default: 10)
+  // - minScore: Minimum similarity threshold
+  // - fileType: Filter by 'code' | 'docs' | 'config'
+  // - language: Filter by programming language
+}
