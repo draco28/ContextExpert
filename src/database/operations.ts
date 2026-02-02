@@ -305,6 +305,54 @@ export class DatabaseOperations {
       databaseSize: this.getDatabaseSize(),
     };
   }
+
+  /**
+   * Update project metadata (description and tags).
+   *
+   * Only updates fields that are provided - doesn't overwrite others.
+   * Used by /describe command to enable smart query routing.
+   *
+   * @example
+   * ```typescript
+   * db.updateProjectMetadata(projectId, {
+   *   description: 'Main REST API with auth',
+   *   tags: ['backend', 'api', 'auth']
+   * });
+   * ```
+   */
+  updateProjectMetadata(
+    projectId: string,
+    metadata: { description?: string; tags?: string[] }
+  ): void {
+    // Build dynamic SET clause - only update provided fields
+    const updates: string[] = [];
+    const params: Record<string, unknown> = { id: projectId };
+
+    if (metadata.description !== undefined) {
+      updates.push('description = @description');
+      params.description = metadata.description;
+    }
+
+    if (metadata.tags !== undefined) {
+      updates.push('tags = @tags');
+      params.tags = JSON.stringify(metadata.tags);
+    }
+
+    // Nothing to update
+    if (updates.length === 0) return;
+
+    // Always update timestamp when metadata changes
+    updates.push('updated_at = @now');
+    params.now = new Date().toISOString();
+
+    const stmt = this.db.prepare(`
+      UPDATE projects
+      SET ${updates.join(', ')}
+      WHERE id = @id
+    `);
+
+    stmt.run(params);
+  }
 }
 
 // Singleton instance

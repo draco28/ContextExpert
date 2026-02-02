@@ -106,3 +106,26 @@ export type {
   CitationsOutputJSON,
   CitationFormatter,
 } from './citations.js';
+
+// ============================================================================
+// Query Routing (Smart Project Selection)
+// ============================================================================
+
+export {
+  QueryIntentClassifier,
+  LLMProjectRouter,
+  createIntentClassifier,
+  createProjectRouter,
+  LLMRoutingResponseSchema,
+} from './query-router.js';
+
+export type {
+  QueryIntent,
+  IntentFeatures,
+  IntentClassificationResult,
+  QueryIntentClassifierConfig,
+  ProjectMetadata,
+  LLMRoutingResponse,
+  RoutingResult,
+  LLMProjectRouterConfig,
+} from './query-router.js';

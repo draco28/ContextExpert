@@ -14,6 +14,7 @@
  *   /focus X   - Switch to project X
  *   /unfocus   - Clear project scope
  *   /projects  - List available projects
+ *   /describe  - Add description/tags to project for smart routing
  *   /clear     - Clear conversation history
  *   exit       - Exit the chat
  */
@@ -658,6 +659,81 @@ const REPL_COMMANDS: REPLCommand[] = [
         ctx.log(chalk.dim(`* = currently focused`));
       }
       ctx.log('');
+      return true;
+    },
+  },
+  {
+    name: 'describe',
+    aliases: ['desc'],
+    description: 'Add description and tags to a project for smart routing',
+    usage: '<project-name> ["description"] [--tags tag1,tag2]',
+    handler: async (args, _state, ctx) => {
+      // No arguments - show usage
+      if (args.length === 0 || !args[0]) {
+        ctx.log(chalk.yellow('Usage: /describe <project-name> ["description"] [--tags tag1,tag2]'));
+        ctx.log('');
+        ctx.log(chalk.dim('Examples:'));
+        ctx.log(chalk.dim('  /describe my-api "Main REST API server"'));
+        ctx.log(chalk.dim('  /describe my-api --tags backend,auth,payments'));
+        ctx.log(chalk.dim('  /describe my-api "REST API" --tags backend,api'));
+        ctx.log(chalk.dim('  /describe my-api                (show current values)'));
+        return true;
+      }
+
+      // First arg is always the project name
+      const projectName = args[0];
+      const project = findProject(projectName);
+
+      if (!project) {
+        ctx.log(chalk.red(`Project not found: ${projectName}`));
+        ctx.log(chalk.dim('Run /projects to see available projects'));
+        return true;
+      }
+
+      // Join remaining args for parsing
+      const remaining = args.slice(1).join(' ');
+
+      // Extract description (text in quotes)
+      let description: string | undefined;
+      const descMatch = remaining.match(/"([^"]+)"|'([^']+)'/);
+      if (descMatch) {
+        description = descMatch[1] ?? descMatch[2];
+      }
+
+      // Extract tags (--tags tag1,tag2,tag3)
+      let tags: string[] | undefined;
+      const tagsMatch = remaining.match(/--tags?\s+([^\s"']+)/);
+      if (tagsMatch && tagsMatch[1]) {
+        tags = tagsMatch[1].split(',').map((t) => t.trim()).filter(Boolean);
+      }
+
+      // Show-only mode (no description or tags provided)
+      if (!description && !tags) {
+        const existingTags = project.tags ? JSON.parse(project.tags) as string[] : [];
+        ctx.log('');
+        ctx.log(chalk.bold(`Project: ${project.name}`));
+        ctx.log(`  ${chalk.cyan('Path:')}        ${project.path}`);
+        ctx.log(`  ${chalk.cyan('Description:')} ${project.description ?? chalk.dim('(none)')}`);
+        ctx.log(`  ${chalk.cyan('Tags:')}        ${existingTags.length > 0 ? existingTags.join(', ') : chalk.dim('(none)')}`);
+        ctx.log(`  ${chalk.cyan('Files:')}       ${project.file_count}`);
+        ctx.log(`  ${chalk.cyan('Chunks:')}      ${project.chunk_count}`);
+        ctx.log('');
+        return true;
+      }
+
+      // Update project metadata
+      const db = getDatabase();
+      db.updateProjectMetadata(project.id, { description, tags });
+
+      ctx.log(chalk.green(`✓ Updated project: ${project.name}`));
+      if (description) {
+        ctx.log(`  ${chalk.cyan('Description:')} ${description}`);
+      }
+      if (tags && tags.length > 0) {
+        ctx.log(`  ${chalk.cyan('Tags:')}        ${tags.join(', ')}`);
+      }
+      ctx.log('');
+
       return true;
     },
   },
