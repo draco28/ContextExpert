@@ -634,83 +634,111 @@ export function createCompleter(
 
 /**
  * Main REPL loop using readline.
+ *
+ * Uses event-based pattern (rl.on('line', ...)) instead of async iterator
+ * (for await) for robustness. The async iterator pattern can exit prematurely
+ * when combined with other async operations like streaming LLM responses.
  */
 async function runChatREPL(
   state: ChatState,
   ctx: CommandContext
 ): Promise<void> {
-  const completer = createCompleter();
+  return new Promise((resolve) => {
+    const completer = createCompleter();
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: getPrompt(state),
-    completer,
-  });
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+      prompt: getPrompt(state),
+      completer,
+    });
 
-  // Store rl in state so handlers can update prompt
-  state.rl = rl;
+    // Store rl in state so handlers can update prompt
+    state.rl = rl;
 
-  // Handle Ctrl+C gracefully
-  rl.on('SIGINT', () => {
-    ctx.log('');
-    ctx.log(chalk.dim('Goodbye!'));
-    cleanupChatState(state);
-    rl.close();
-  });
+    // Track if we've already cleaned up to prevent double-cleanup
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        cleanupChatState(state);
+      }
+    };
 
-  displayWelcome(state, ctx);
-  rl.prompt();
+    // ─────────────────────────────────────────────────────────────────────
+    // Register all event handlers BEFORE calling prompt()
+    // This ensures no input is lost to unregistered handlers
+    // ─────────────────────────────────────────────────────────────────────
 
-  for await (const line of rl) {
-    const input = line.trim();
+    // Handle each line of input
+    rl.on('line', async (line) => {
+      const input = line.trim();
 
-    // Skip empty input
-    if (!input) {
-      rl.prompt();
-      continue;
-    }
+      // Skip empty input
+      if (!input) {
+        rl.prompt();
+        return;
+      }
 
-    // Check for REPL commands
-    const replCmd = parseREPLCommand(input);
-    if (replCmd) {
+      // Check for REPL commands
+      const replCmd = parseREPLCommand(input);
+      if (replCmd) {
+        try {
+          const shouldContinue = await replCmd.command.handler(
+            replCmd.args,
+            state,
+            ctx
+          );
+          if (!shouldContinue) {
+            cleanup();
+            rl.close();
+            resolve();
+            return;
+          }
+        } catch (error) {
+          ctx.error(`Command failed: ${error}`);
+        }
+        rl.prompt();
+        return;
+      }
+
+      // Handle as question
       try {
-        const shouldContinue = await replCmd.command.handler(
-          replCmd.args,
-          state,
-          ctx
-        );
-        if (!shouldContinue) {
-          rl.close();
-          return;
-        }
+        await handleQuestion(input, state, ctx);
       } catch (error) {
-        ctx.error(`Command failed: ${error}`);
-      }
-      rl.prompt();
-      continue;
-    }
-
-    // Handle as question
-    try {
-      await handleQuestion(input, state, ctx);
-    } catch (error) {
-      if (error instanceof CLIError) {
-        ctx.error(error.message);
-        if (error.hint) {
-          ctx.log(chalk.dim(error.hint));
+        if (error instanceof CLIError) {
+          ctx.error(error.message);
+          if (error.hint) {
+            ctx.log(chalk.dim(error.hint));
+          }
+        } else {
+          ctx.error(`Failed to process question: ${error}`);
         }
-      } else {
-        ctx.error(`Failed to process question: ${error}`);
       }
-    }
 
+      rl.prompt();
+    });
+
+    // Handle Ctrl+C gracefully
+    rl.on('SIGINT', () => {
+      ctx.log('');
+      ctx.log(chalk.dim('Goodbye!'));
+      cleanup();
+      rl.close();
+      resolve();
+    });
+
+    // Handle stream close (EOF, pipe closed, etc.)
+    // This is a safety net for unexpected closures
+    rl.on('close', () => {
+      cleanup();
+      resolve();
+    });
+
+    // All handlers registered - now safe to start accepting input
+    displayWelcome(state, ctx);
     rl.prompt();
-  }
-
-  // Cleanup on natural loop exit (e.g., EOF on stdin)
-  // This is a safety net - exit command and SIGINT already call cleanup
-  cleanupChatState(state);
+  });
 }
 
 // ============================================================================

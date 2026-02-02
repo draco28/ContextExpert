@@ -53,13 +53,17 @@ vi.mock('../../../agent/citations.js', () => ({
 }));
 
 // Mock readline to prevent actual REPL from starting
+// Uses event-based pattern (rl.on) - no async iterator needed
 vi.mock('node:readline', () => ({
   createInterface: vi.fn().mockReturnValue({
     prompt: vi.fn(),
     close: vi.fn(),
-    on: vi.fn(),
-    [Symbol.asyncIterator]: vi.fn().mockReturnValue({
-      next: vi.fn().mockResolvedValue({ done: true }),
+    on: vi.fn((event: string, handler: () => void) => {
+      // Immediately trigger 'close' to end the REPL loop in tests
+      if (event === 'close') {
+        // Use setImmediate to allow the REPL to set up first
+        setImmediate(handler);
+      }
     }),
   }),
 }));
