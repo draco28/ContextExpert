@@ -202,12 +202,48 @@ function updatePrompt(state: ChatState): void {
 // ============================================================================
 
 /**
+ * Format a path with ~ for home directory.
+ * Matches the pattern used in status.ts for consistency.
+ */
+function formatPath(filePath: string): string {
+  const homeDir = process.env['HOME'] ?? process.env['USERPROFILE'] ?? '';
+  if (homeDir && filePath.startsWith(homeDir)) {
+    return '~' + filePath.slice(homeDir.length);
+  }
+  return filePath;
+}
+
+/**
+ * Format a date as relative time (e.g., "2 hours ago", "yesterday").
+ * Used by /index status to show when projects were last indexed.
+ */
+function formatRelativeTime(date: Date): string {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSecs < 60) return 'just now';
+  if (diffMins < 60) return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+  if (diffDays === 1) return 'yesterday';
+  if (diffDays < 7) return `${diffDays} days ago`;
+
+  // For older dates, show the actual date
+  return date.toLocaleDateString();
+}
+
+/**
  * Result of parsing /index command arguments.
  */
 interface IndexArgs {
   path: string;
   name?: string;
   force: boolean;
+  /** Subcommand: 'status' for /index status */
+  subcommand?: 'status';
 }
 
 /**
@@ -217,10 +253,16 @@ interface IndexArgs {
  *   /index <path>                 - Basic usage
  *   /index <path> -n <name>       - Custom project name
  *   /index <path> --force         - Re-index existing project
+ *   /index status                 - Show indexing status
  *
  * @internal Exported for testing
  */
 export function parseIndexArgs(args: string[]): IndexArgs {
+  // Check for 'status' subcommand first (case-insensitive)
+  if (args.length > 0 && args[0]?.toLowerCase() === 'status') {
+    return { path: '', name: undefined, force: false, subcommand: 'status' };
+  }
+
   let path = '';
   let name: string | undefined;
   let force = false;
@@ -243,6 +285,64 @@ export function parseIndexArgs(args: string[]): IndexArgs {
 }
 
 /**
+ * Handle /index status command to show indexing status.
+ *
+ * Since /index runs synchronously and blocks the REPL, this command
+ * can only show historical information (last indexed project).
+ * Real-time progress is displayed during the /index command itself.
+ *
+ * @returns true to continue REPL
+ */
+async function handleIndexStatusCommand(
+  _state: ChatState,
+  ctx: CommandContext
+): Promise<boolean> {
+  runMigrations();
+  const db = getDb();
+
+  // Get the most recently indexed project (by indexed_at timestamp)
+  const lastIndexed = db
+    .prepare(
+      'SELECT * FROM projects WHERE indexed_at IS NOT NULL ORDER BY indexed_at DESC LIMIT 1'
+    )
+    .get() as Project | undefined;
+
+  ctx.log('');
+  ctx.log(chalk.bold('Index Status'));
+  ctx.log(chalk.dim('─'.repeat(35)));
+  ctx.log(`${chalk.cyan('State:')}          ${chalk.green('idle')}`);
+
+  if (lastIndexed) {
+    const indexedAt = new Date(lastIndexed.indexed_at!);
+    const relativeTime = formatRelativeTime(indexedAt);
+
+    ctx.log('');
+    ctx.log(chalk.bold('Last Indexed Project:'));
+    ctx.log(`  ${chalk.cyan('Name:')}        ${lastIndexed.name}`);
+    ctx.log(`  ${chalk.cyan('Path:')}        ${formatPath(lastIndexed.path)}`);
+    ctx.log(`  ${chalk.cyan('Indexed:')}     ${relativeTime}`);
+    ctx.log(`  ${chalk.cyan('Files:')}       ${lastIndexed.file_count.toLocaleString()}`);
+    ctx.log(`  ${chalk.cyan('Chunks:')}      ${lastIndexed.chunk_count.toLocaleString()}`);
+
+    if (lastIndexed.embedding_model) {
+      ctx.log(`  ${chalk.cyan('Model:')}       ${lastIndexed.embedding_model}`);
+    }
+
+    // Warn if the project path no longer exists
+    if (!existsSync(lastIndexed.path)) {
+      ctx.log(`  ${chalk.yellow('(path no longer exists)')}`);
+    }
+  } else {
+    ctx.log('');
+    ctx.log(chalk.dim('No projects have been indexed yet.'));
+    ctx.log(chalk.dim(`Run ${chalk.cyan('/index <path>')} to index a project.`));
+  }
+
+  ctx.log('');
+  return true;
+}
+
+/**
  * Handle /index command to index a project from within the REPL.
  *
  * This reuses the same indexing pipeline as `ctx index`, providing:
@@ -258,12 +358,18 @@ async function handleIndexCommand(
   ctx: CommandContext
 ): Promise<boolean> {
   // 1. Parse arguments
-  const { path: inputPath, name, force } = parseIndexArgs(args);
+  const { path: inputPath, name, force, subcommand } = parseIndexArgs(args);
+
+  // Handle /index status subcommand
+  if (subcommand === 'status') {
+    return handleIndexStatusCommand(state, ctx);
+  }
 
   if (!inputPath) {
-    ctx.log(chalk.yellow('Usage: /index <path> [-n name] [--force]'));
+    ctx.log(chalk.yellow('Usage: /index <path> [-n name] [--force] | status'));
     ctx.log(chalk.dim('Example: /index ./my-project'));
     ctx.log(chalk.dim('         /index ../other-repo -n my-app'));
+    ctx.log(chalk.dim('         /index status'));
     return true;
   }
 
@@ -569,7 +675,7 @@ const REPL_COMMANDS: REPLCommand[] = [
     name: 'index',
     aliases: ['i'],
     description: 'Index a project directory for RAG search',
-    usage: '<path> [-n name] [--force]',
+    usage: '<path> [-n name] [--force] | status',
     handler: async (args, state, ctx) => {
       return handleIndexCommand(args, state, ctx);
     },
