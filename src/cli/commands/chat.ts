@@ -40,7 +40,11 @@ import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import { validateProjectPath } from '../../utils/path-validation.js';
 import { createProgressReporter, type IndexPipelineResult } from '../utils/progress.js';
-import { runIndexPipeline, createEmbeddingProvider } from '../../indexer/index.js';
+import {
+  runIndexPipeline,
+  createEmbeddingProvider,
+  type EmbeddingProvider,
+} from '../../indexer/index.js';
 import type { Project } from '../../database/schema.js';
 import { handleProviderCommand, createProviderFromConfig } from './provider-repl.js';
 import { getDefaultProvider } from '../../config/providers.js';
@@ -224,7 +228,10 @@ export function parseIndexArgs(args: string[]): IndexArgs {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '-n' || arg === '--name') {
-      name = args[++i];
+      // Bounds check: only consume next arg if it exists
+      if (i + 1 < args.length) {
+        name = args[++i];
+      }
     } else if (arg === '--force' || arg === '-f') {
       force = true;
     } else if (!path && arg && !arg.startsWith('-')) {
@@ -302,7 +309,9 @@ async function handleIndexCommand(
     }).start();
   }
 
-  let embeddingProvider, embeddingModel: string, embeddingDimensions: number;
+  let embeddingProvider: EmbeddingProvider;
+  let embeddingModel: string;
+  let embeddingDimensions: number;
   try {
     const result = await createEmbeddingProvider(state.config.embedding, {
       onProgress: (progress) => {

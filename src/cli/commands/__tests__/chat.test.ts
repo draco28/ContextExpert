@@ -671,6 +671,25 @@ describe('parseIndexArgs', () => {
       const result = parseIndexArgs(['./first', './second']);
       expect(result).toEqual({ path: './first', name: undefined, force: false });
     });
+
+    it('handles -n as last argument (no value)', () => {
+      const result = parseIndexArgs(['./path', '-n']);
+      expect(result).toEqual({ path: './path', name: undefined, force: false });
+    });
+
+    it('handles --name as last argument (no value)', () => {
+      const result = parseIndexArgs(['./path', '--name']);
+      expect(result).toEqual({ path: './path', name: undefined, force: false });
+    });
+
+    it('handles -n followed by another flag (flag consumed as name)', () => {
+      // Note: -n consumes the next arg regardless of whether it's a flag
+      // This matches common CLI behavior (e.g., git commit -m -v)
+      const result = parseIndexArgs(['./path', '-n', '--force']);
+      expect(result.path).toBe('./path');
+      expect(result.name).toBe('--force');
+      expect(result.force).toBe(false);
+    });
   });
 });
 
