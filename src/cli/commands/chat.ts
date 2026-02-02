@@ -700,16 +700,17 @@ const REPL_COMMANDS: REPLCommand[] = [
         description = descMatch[1] ?? descMatch[2];
       }
 
-      // Extract tags (--tags tag1,tag2,tag3)
+      // Extract tags (--tags tag1,tag2,tag3 or --tags "tag1, tag2, tag3")
       let tags: string[] | undefined;
-      const tagsMatch = remaining.match(/--tags?\s+([^\s"']+)/);
-      if (tagsMatch && tagsMatch[1]) {
-        tags = tagsMatch[1].split(',').map((t) => t.trim()).filter(Boolean);
+      const tagsMatch = remaining.match(/--tags?\s+(?:"([^"]+)"|'([^']+)'|([^\s]+))/);
+      if (tagsMatch) {
+        const tagsValue = tagsMatch[1] ?? tagsMatch[2] ?? tagsMatch[3] ?? '';
+        tags = tagsValue.split(',').map((t) => t.trim()).filter(Boolean);
       }
 
       // Show-only mode (no description or tags provided)
       if (!description && !tags) {
-        const existingTags = project.tags ? JSON.parse(project.tags) as string[] : [];
+        const existingTags = safeParseJsonArray(project.tags);
         ctx.log('');
         ctx.log(chalk.bold(`Project: ${project.name}`));
         ctx.log(`  ${chalk.cyan('Path:')}        ${project.path}`);
@@ -780,6 +781,20 @@ const REPL_COMMANDS: REPLCommand[] = [
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Safely parse a JSON array from database, returning empty array on error.
+ * Handles null, undefined, and malformed JSON gracefully.
+ */
+function safeParseJsonArray(json: string | null | undefined): string[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Find a project by name (case-insensitive).

@@ -583,11 +583,7 @@ export class LLMProjectRouter {
     let lastError: Error | undefined;
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       try {
-        const response = await Promise.race([
-          this.callLLM(prompt),
-          this.timeout(this.llmTimeout),
-        ]);
-
+        const response = await this.callLLMWithTimeout(prompt);
         // Parse and validate response
         return this.parseRoutingResponse(response, projects);
       } catch (error) {
@@ -597,6 +593,30 @@ export class LLMProjectRouter {
     }
 
     throw lastError ?? new Error('LLM routing failed after retries');
+  }
+
+  /**
+   * Call LLM with timeout that properly cleans up on success or failure.
+   */
+  private async callLLMWithTimeout(prompt: string): Promise<string> {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let timeoutReject: ((reason: Error) => void) | undefined;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutReject = reject;
+      timeoutId = setTimeout(
+        () => reject(new Error(`LLM routing timed out after ${this.llmTimeout}ms`)),
+        this.llmTimeout
+      );
+    });
+
+    try {
+      const result = await Promise.race([this.callLLM(prompt), timeoutPromise]);
+      return result;
+    } finally {
+      // Clean up timeout to prevent unhandled rejection
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   }
 
   /**
@@ -649,11 +669,14 @@ export class LLMProjectRouter {
     const parsed = JSON.parse(jsonMatch[0]);
     const validated = LLMRoutingResponseSchema.parse(parsed);
 
-    // Filter to only valid project IDs
+    // Filter to only valid project IDs (return new object, don't mutate validated)
     const validIds = new Set(projects.map((p) => p.id));
-    validated.projectIds = validated.projectIds.filter((id) => validIds.has(id));
+    const filteredProjectIds = validated.projectIds.filter((id) => validIds.has(id));
 
-    return validated;
+    return {
+      ...validated,
+      projectIds: filteredProjectIds,
+    };
   }
 
   /**
@@ -666,14 +689,6 @@ export class LLMProjectRouter {
       .filter((id): id is string => id !== undefined);
   }
 
-  /**
-   * Timeout promise for LLM calls.
-   */
-  private timeout(ms: number): Promise<never> {
-    return new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`LLM routing timed out after ${ms}ms`)), ms);
-    });
-  }
 }
 
 // ============================================================================
