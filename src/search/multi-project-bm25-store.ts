@@ -14,7 +14,8 @@
  * - Each project has its own BM25Retriever (per BM25StoreManager)
  * - Search runs in parallel across all loaded retrievers
  * - Results are merged using RRF, same algorithm as FusionService
- * - projectId is injected at search time (not stored in chunk metadata)
+ * - projectId available from two sources: chunk metadata (for filtering) and
+ *   explicit injection at search time (for MultiProjectSearchResult attribution)
  *
  * Key Difference from MultiProjectVectorStoreManager:
  * - No validation phase needed - BM25 uses text tokenization, not embeddings

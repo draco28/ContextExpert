@@ -196,6 +196,7 @@ export class BM25StoreManager {
           id: row.id,
           content: row.content,
           metadata: {
+            projectId, // Include projectId for cross-project result attribution
             filePath: row.file_path,
             fileType: row.file_type,
             language: row.language,
