@@ -298,7 +298,7 @@ async function handleIndexStatusCommand(
   ctx: CommandContext
 ): Promise<boolean> {
   runMigrations();
-  const db = getDatabase();
+  const db = getDb();
 
   // Get the most recently indexed project (by indexed_at timestamp)
   const lastIndexed = db
