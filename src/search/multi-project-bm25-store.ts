@@ -41,7 +41,6 @@ import type { BM25Retriever } from '@contextaisdk/rag';
 import { reciprocalRankFusion, DEFAULT_RRF_K, type RankingList } from '@contextaisdk/rag';
 
 import { getDatabase, type DatabaseOperations } from '../database/operations.js';
-import type { Project } from '../database/schema.js';
 import { getBM25StoreManager, type BM25StoreManager } from './bm25-store.js';
 import { formatSearchResult } from './shared-formatting.js';
 import type {
@@ -160,11 +159,15 @@ export class MultiProjectBM25StoreManager {
     const searchPromises = Array.from(this.loadedProjects.entries()).map(
       async ([projectId, projectInfo]) => {
         // Defensive check: Skip projects whose retrievers were invalidated externally
+        // (e.g., by resetBM25StoreManager() or invalidate()) between loadRetrievers()
+        // and this search call. This prevents errors and gracefully degrades results.
         if (!this.storeManager.hasRetriever(projectId)) {
           return;
         }
 
-        // Get the cached retriever
+        // Get the cached retriever. Note: If external code called invalidate() between
+        // our hasRetriever() check and now, this will trigger a rebuild. This is safe
+        // but may have performance implications in concurrent scenarios.
         const retriever = await this.storeManager.getRetriever({ projectId });
 
         // Perform BM25 search
