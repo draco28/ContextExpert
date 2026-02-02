@@ -3,13 +3,14 @@
  *
  * Interactive multi-turn chat REPL with RAG-powered Q&A.
  * Maintains conversation history within a session and supports
- * REPL commands for project switching, history clearing, etc.
+ * REPL commands for project switching, indexing, history clearing, etc.
  *
  *   ctx chat                     # Start chat (uses most recent project)
  *   ctx chat --project my-app    # Start focused on specific project
  *
  * REPL Commands:
  *   /help      - Show available commands
+ *   /index X   - Index directory X for RAG search
  *   /focus X   - Switch to project X
  *   /unfocus   - Clear project scope
  *   /projects  - List available projects
@@ -18,6 +19,7 @@
  */
 
 import * as readline from 'node:readline';
+import { basename } from 'node:path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
@@ -29,13 +31,16 @@ import {
   type StreamChunk,
   type TokenUsage,
 } from '@contextaisdk/core';
-import { getDb, runMigrations } from '../../database/index.js';
+import { getDb, runMigrations, getDatabase } from '../../database/index.js';
 import { loadConfig, type Config } from '../../config/loader.js';
 import { createRAGEngine, type ContextExpertRAGEngine } from '../../agent/rag-engine.js';
 import { RAGEngineError, RAGErrorCodes, type RAGSource } from '../../agent/types.js';
 import { formatCitations } from '../../agent/citations.js';
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
+import { validateProjectPath } from '../../utils/path-validation.js';
+import { createProgressReporter, type IndexPipelineResult } from '../utils/progress.js';
+import { runIndexPipeline, createEmbeddingProvider } from '../../indexer/index.js';
 import type { Project } from '../../database/schema.js';
 import { handleProviderCommand, createProviderFromConfig } from './provider-repl.js';
 import { getDefaultProvider } from '../../config/providers.js';
@@ -186,6 +191,204 @@ function updatePrompt(state: ChatState): void {
   if (state.rl) {
     state.rl.setPrompt(getPrompt(state));
   }
+}
+
+// ============================================================================
+// Index Command Handler
+// ============================================================================
+
+/**
+ * Result of parsing /index command arguments.
+ */
+interface IndexArgs {
+  path: string;
+  name?: string;
+  force: boolean;
+}
+
+/**
+ * Parse /index command arguments.
+ *
+ * Supports:
+ *   /index <path>                 - Basic usage
+ *   /index <path> -n <name>       - Custom project name
+ *   /index <path> --force         - Re-index existing project
+ *
+ * @internal Exported for testing
+ */
+export function parseIndexArgs(args: string[]): IndexArgs {
+  let path = '';
+  let name: string | undefined;
+  let force = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '-n' || arg === '--name') {
+      name = args[++i];
+    } else if (arg === '--force' || arg === '-f') {
+      force = true;
+    } else if (!path && arg && !arg.startsWith('-')) {
+      path = arg;
+    }
+  }
+
+  return { path, name, force };
+}
+
+/**
+ * Handle /index command to index a project from within the REPL.
+ *
+ * This reuses the same indexing pipeline as `ctx index`, providing:
+ * - Path validation with helpful error messages
+ * - Progress display with spinners (in TTY mode)
+ * - Auto-focus on the newly indexed project
+ *
+ * @returns true to continue REPL
+ */
+async function handleIndexCommand(
+  args: string[],
+  state: ChatState,
+  ctx: CommandContext
+): Promise<boolean> {
+  // 1. Parse arguments
+  const { path: inputPath, name, force } = parseIndexArgs(args);
+
+  if (!inputPath) {
+    ctx.log(chalk.yellow('Usage: /index <path> [-n name] [--force]'));
+    ctx.log(chalk.dim('Example: /index ./my-project'));
+    ctx.log(chalk.dim('         /index ../other-repo -n my-app'));
+    return true;
+  }
+
+  // 2. Validate path (same validation as `ctx index`)
+  const validation = validateProjectPath(inputPath);
+  if (!validation.valid) {
+    ctx.error(validation.error);
+    if (validation.hint) ctx.log(chalk.dim(validation.hint));
+    return true;
+  }
+
+  const projectPath = validation.normalizedPath;
+  for (const warning of validation.warnings) {
+    ctx.log(chalk.yellow(`Warning: ${warning}`));
+  }
+
+  // 3. Determine project name (default to directory name)
+  const projectName = name ?? basename(projectPath);
+
+  // 4. Check for existing project
+  runMigrations();
+  const db = getDatabase();
+  const existingProject = db.getProjectByPath(projectPath);
+
+  if (existingProject && !force) {
+    ctx.error(`Project already indexed: ${existingProject.name}`);
+    ctx.log(chalk.dim('Use /index <path> --force to re-index'));
+    return true;
+  }
+
+  if (existingProject && force) {
+    ctx.log(chalk.dim(`Re-indexing: clearing ${existingProject.chunk_count} existing chunks`));
+    db.deleteProjectChunks(existingProject.id);
+  }
+
+  // 5. Create embedding provider with progress display
+  ctx.log('');
+  let modelLoadingSpinner: ReturnType<typeof ora> | null = null;
+  if (process.stdout.isTTY) {
+    modelLoadingSpinner = ora({
+      text: 'Loading embedding model...',
+      prefixText: chalk.cyan('Setup'.padEnd(12)),
+    }).start();
+  }
+
+  let embeddingProvider, embeddingModel: string, embeddingDimensions: number;
+  try {
+    const result = await createEmbeddingProvider(state.config.embedding, {
+      onProgress: (progress) => {
+        if (modelLoadingSpinner) {
+          const pct = progress.progress ? ` (${progress.progress}%)` : '';
+          modelLoadingSpinner.text = `${progress.status}${pct}`;
+        }
+      },
+    });
+    embeddingProvider = result.provider;
+    embeddingModel = result.model;
+    embeddingDimensions = result.dimensions;
+    modelLoadingSpinner?.succeed(
+      `Embedding model ready (${embeddingModel}, ${embeddingDimensions}d)`
+    );
+  } catch (error) {
+    modelLoadingSpinner?.fail('Failed to load embedding model');
+    ctx.error(`Embedding setup failed: ${(error as Error).message}`);
+    ctx.log(chalk.dim('Check your embedding configuration: ctx config list'));
+    return true;
+  }
+
+  // 6. Create progress reporter (same as `ctx index`)
+  const reporter = createProgressReporter({
+    json: ctx.options.json,
+    verbose: ctx.options.verbose,
+    noColor: !!process.env.NO_COLOR,
+    isInteractive: process.stdout.isTTY ?? false,
+  });
+
+  // 7. Run the indexing pipeline
+  let result: IndexPipelineResult;
+  try {
+    result = await runIndexPipeline({
+      projectPath,
+      projectName,
+      projectId: existingProject?.id,
+      embeddingProvider,
+      embeddingModel,
+      embeddingDimensions,
+      embeddingTimeout: state.config.embedding.timeout_ms,
+      chunkerConfig: { embeddingProvider },
+      onStageStart: (stage, total) => reporter.startStage(stage, total),
+      onProgress: (_stage, processed, _total, currentFile) =>
+        reporter.updateProgress(processed, currentFile),
+      onStageComplete: (_stage, stats) => reporter.completeStage(stats),
+      onWarning: (message, context) => reporter.warn(message, context),
+      onError: (error, context) => reporter.error(error.message, context),
+    });
+  } catch (error) {
+    ctx.error(`Indexing failed: ${(error as Error).message}`);
+    ctx.log(chalk.dim('Try running: ctx index <path> for detailed diagnostics'));
+    return true;
+  }
+
+  // 8. Show summary
+  reporter.showSummary(result);
+
+  // 9. Auto-focus on the newly indexed project
+  try {
+    const newProject = db.getProjectById(result.projectId);
+    if (newProject) {
+      const newRagEngine = await createRAGEngine(state.config, result.projectId);
+
+      // Dispose old RAG engine if exists (releases memory)
+      state.ragEngine?.dispose();
+
+      state.currentProject = newProject;
+      state.ragEngine = newRagEngine;
+      updatePrompt(state);
+
+      ctx.log(chalk.blue(`Now focused on: ${result.projectName}`));
+      ctx.log(chalk.dim('Ask questions about your code, or use /unfocus to clear focus'));
+    }
+  } catch (error) {
+    // Non-fatal: indexing succeeded, just couldn't auto-focus
+    ctx.log(
+      chalk.yellow(
+        `Indexed successfully, but auto-focus failed: ${(error as Error).message}`
+      )
+    );
+    ctx.log(chalk.dim(`Use /focus ${result.projectName} to focus manually`));
+  }
+
+  ctx.log('');
+  return true;
 }
 
 // ============================================================================
@@ -351,6 +554,15 @@ const REPL_COMMANDS: REPLCommand[] = [
       state.conversationContext.clear();
       ctx.log(chalk.blue('Conversation history cleared'));
       return true;
+    },
+  },
+  {
+    name: 'index',
+    aliases: ['i'],
+    description: 'Index a project directory for RAG search',
+    usage: '<path> [-n name] [--force]',
+    handler: async (args, state, ctx) => {
+      return handleIndexCommand(args, state, ctx);
     },
   },
   {

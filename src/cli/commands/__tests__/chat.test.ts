@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { Command } from 'commander';
-import { createChatCommand, parseREPLCommand, createCompleter } from '../chat.js';
+import { createChatCommand, parseREPLCommand, createCompleter, parseIndexArgs } from '../chat.js';
 import type { CommandContext } from '../../types.js';
 import * as database from '../../../database/index.js';
 import * as configLoader from '../../../config/loader.js';
@@ -25,6 +25,46 @@ import * as llmProvider from '../../../providers/llm.js';
 vi.mock('../../../database/index.js', () => ({
   runMigrations: vi.fn(),
   getDb: vi.fn(),
+  getDatabase: vi.fn().mockReturnValue({
+    getProjectByPath: vi.fn().mockReturnValue(null),
+    getProjectById: vi.fn().mockReturnValue(null),
+    deleteProjectChunks: vi.fn(),
+  }),
+}));
+
+// Mock path validation
+vi.mock('../../../utils/path-validation.js', () => ({
+  validateProjectPath: vi.fn().mockReturnValue({
+    valid: true,
+    normalizedPath: '/test/path',
+    warnings: [],
+  }),
+}));
+
+// Mock progress reporter
+vi.mock('../../utils/progress.js', () => ({
+  createProgressReporter: vi.fn().mockReturnValue({
+    startStage: vi.fn(),
+    updateProgress: vi.fn(),
+    completeStage: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    showSummary: vi.fn(),
+  }),
+}));
+
+// Mock indexer
+vi.mock('../../../indexer/index.js', () => ({
+  runIndexPipeline: vi.fn().mockResolvedValue({
+    projectId: 'test-project-id',
+    projectName: 'test-project',
+    stats: {},
+  }),
+  createEmbeddingProvider: vi.fn().mockResolvedValue({
+    provider: {},
+    model: 'test-model',
+    dimensions: 384,
+  }),
 }));
 
 // Mock the config loader
@@ -538,6 +578,135 @@ describe('createCompleter (tab completion)', () => {
       expect(result).toHaveLength(2);
       expect(Array.isArray(result[0])).toBe(true);
       expect(typeof result[1]).toBe('string');
+    });
+  });
+});
+
+describe('parseIndexArgs', () => {
+  describe('path parsing', () => {
+    it('parses path only', () => {
+      const result = parseIndexArgs(['./my-project']);
+      expect(result).toEqual({ path: './my-project', name: undefined, force: false });
+    });
+
+    it('parses absolute path', () => {
+      const result = parseIndexArgs(['/Users/test/my-project']);
+      expect(result).toEqual({ path: '/Users/test/my-project', name: undefined, force: false });
+    });
+
+    it('parses relative path with ../', () => {
+      const result = parseIndexArgs(['../other-repo']);
+      expect(result).toEqual({ path: '../other-repo', name: undefined, force: false });
+    });
+
+    it('parses current directory', () => {
+      const result = parseIndexArgs(['.']);
+      expect(result).toEqual({ path: '.', name: undefined, force: false });
+    });
+
+    it('returns empty path when no args', () => {
+      const result = parseIndexArgs([]);
+      expect(result).toEqual({ path: '', name: undefined, force: false });
+    });
+  });
+
+  describe('-n/--name option', () => {
+    it('parses -n short flag', () => {
+      const result = parseIndexArgs(['./my-project', '-n', 'custom-name']);
+      expect(result).toEqual({ path: './my-project', name: 'custom-name', force: false });
+    });
+
+    it('parses --name long flag', () => {
+      const result = parseIndexArgs(['./my-project', '--name', 'my-app']);
+      expect(result).toEqual({ path: './my-project', name: 'my-app', force: false });
+    });
+
+    it('handles name before path', () => {
+      const result = parseIndexArgs(['-n', 'app', './path']);
+      expect(result).toEqual({ path: './path', name: 'app', force: false });
+    });
+  });
+
+  describe('--force/-f option', () => {
+    it('parses --force flag', () => {
+      const result = parseIndexArgs(['./my-project', '--force']);
+      expect(result).toEqual({ path: './my-project', name: undefined, force: true });
+    });
+
+    it('parses -f short flag', () => {
+      const result = parseIndexArgs(['./my-project', '-f']);
+      expect(result).toEqual({ path: './my-project', name: undefined, force: true });
+    });
+
+    it('handles force before path', () => {
+      const result = parseIndexArgs(['--force', './path']);
+      expect(result).toEqual({ path: './path', name: undefined, force: true });
+    });
+  });
+
+  describe('combined options', () => {
+    it('parses all options together', () => {
+      const result = parseIndexArgs(['./my-project', '-n', 'my-app', '--force']);
+      expect(result).toEqual({ path: './my-project', name: 'my-app', force: true });
+    });
+
+    it('handles options in any order', () => {
+      const result = parseIndexArgs(['--force', '-n', 'app', './path']);
+      expect(result).toEqual({ path: './path', name: 'app', force: true });
+    });
+
+    it('handles path between options', () => {
+      const result = parseIndexArgs(['-f', './path', '-n', 'name']);
+      expect(result).toEqual({ path: './path', name: 'name', force: true });
+    });
+  });
+
+  describe('edge cases', () => {
+    it('ignores unknown flags', () => {
+      const result = parseIndexArgs(['./path', '--unknown', '-x']);
+      expect(result).toEqual({ path: './path', name: undefined, force: false });
+    });
+
+    it('takes first positional as path', () => {
+      const result = parseIndexArgs(['./first', './second']);
+      expect(result).toEqual({ path: './first', name: undefined, force: false });
+    });
+  });
+});
+
+describe('parseREPLCommand - /index', () => {
+  describe('/index command', () => {
+    it('recognizes /index command', () => {
+      const result = parseREPLCommand('/index ./my-project');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('index');
+      expect(result?.args).toEqual(['./my-project']);
+    });
+
+    it('recognizes /i alias', () => {
+      const result = parseREPLCommand('/i ./path');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('index');
+      expect(result?.args).toEqual(['./path']);
+    });
+
+    it('parses multiple arguments', () => {
+      const result = parseREPLCommand('/index ./path -n myapp --force');
+      expect(result?.command.name).toBe('index');
+      expect(result?.args).toEqual(['./path', '-n', 'myapp', '--force']);
+    });
+
+    it('handles no arguments', () => {
+      const result = parseREPLCommand('/index');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('index');
+      expect(result?.args).toEqual([]);
+    });
+
+    it('is case-insensitive', () => {
+      const result = parseREPLCommand('/INDEX ./path');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('index');
     });
   });
 });
