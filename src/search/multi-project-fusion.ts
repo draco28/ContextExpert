@@ -57,7 +57,14 @@ import type {
   MultiProjectLoadProgress,
   EmbeddingValidation,
   FusionConfig,
+  SearchResultWithContext,
 } from './types.js';
+
+/**
+ * Project attribution lookup map type.
+ * Maps chunk ID to its project info for restoration after RRF/reranking.
+ */
+type ProjectLookup = Map<string, { projectId: string; projectName: string }>;
 
 /**
  * Multi-Project Fusion Service
@@ -206,17 +213,24 @@ export class MultiProjectFusionService {
       this.bm25Manager.search(query, searchOptions),
     ]);
 
+    // Build project lookup BEFORE any transformations that lose project fields
+    // This is needed because both computeRRF() and reranker return base types
+    const projectLookup = this.buildProjectLookup(denseResults, bm25Results);
+
     // Fuse results using RRF (dense vs BM25)
-    let fusedResults = this.fuseResults(denseResults, bm25Results);
+    let fusedResults = this.fuseResults(denseResults, bm25Results, projectLookup);
 
     // Apply reranking if enabled
-    // Reranker takes candidates and returns top K after cross-encoder scoring
+    // CRITICAL: reranker.rerank() returns SearchResultWithContext[] which loses
+    // projectId/projectName - we must restore them after reranking
     if (this.shouldRerank && this.rerankerService) {
-      fusedResults = await this.rerankerService.rerank(
+      const reranked = await this.rerankerService.rerank(
         query,
         fusedResults,
         topK
       );
+      // Restore project attribution after reranking
+      fusedResults = this.restoreProjectAttribution(reranked, projectLookup);
     }
 
     // Apply post-fusion filters
@@ -233,48 +247,69 @@ export class MultiProjectFusionService {
   }
 
   /**
+   * Build a lookup map for project attribution.
+   *
+   * This map is used to restore projectId/projectName after operations
+   * that return base SearchResultWithContext[] (like computeRRF and reranking).
+   */
+  private buildProjectLookup(
+    ...resultSets: MultiProjectSearchResult[][]
+  ): ProjectLookup {
+    const lookup: ProjectLookup = new Map();
+
+    for (const results of resultSets) {
+      for (const result of results) {
+        // First occurrence wins (preserves original project attribution)
+        if (!lookup.has(result.id)) {
+          lookup.set(result.id, {
+            projectId: result.projectId,
+            projectName: result.projectName,
+          });
+        }
+      }
+    }
+
+    return lookup;
+  }
+
+  /**
+   * Restore project attribution to results that lost it.
+   *
+   * Used after computeRRF() and after reranking, both of which return
+   * SearchResultWithContext[] without project fields.
+   */
+  private restoreProjectAttribution(
+    results: SearchResultWithContext[],
+    projectLookup: ProjectLookup
+  ): MultiProjectSearchResult[] {
+    return results.map((result) => {
+      const projectInfo = projectLookup.get(result.id);
+      return {
+        ...result,
+        projectId: projectInfo?.projectId ?? '',
+        projectName: projectInfo?.projectName ?? '',
+      };
+    });
+  }
+
+  /**
    * Fuse dense and BM25 results using Reciprocal Rank Fusion.
    *
    * The key challenge: computeRRF() returns SearchResultWithContext[],
    * but we need MultiProjectSearchResult[] (with projectId/projectName).
    *
-   * Solution: Build a lookup map before RRF, restore attribution after.
+   * Solution: Use the provided lookup map to restore attribution after RRF.
    */
   private fuseResults(
     denseResults: MultiProjectSearchResult[],
-    bm25Results: MultiProjectSearchResult[]
+    bm25Results: MultiProjectSearchResult[],
+    projectLookup: ProjectLookup
   ): MultiProjectSearchResult[] {
-    // Build lookup for project attribution
-    // We need this because computeRRF() doesn't preserve our extended fields
-    const projectLookup = new Map<
-      string,
-      { projectId: string; projectName: string }
-    >();
-
-    for (const result of [...denseResults, ...bm25Results]) {
-      // First occurrence wins (keeps original project attribution)
-      if (!projectLookup.has(result.id)) {
-        projectLookup.set(result.id, {
-          projectId: result.projectId,
-          projectName: result.projectName,
-        });
-      }
-    }
-
     // Compute RRF using existing function (handles ranking + weighting)
     const fused = computeRRF(denseResults, bm25Results, this.fusionConfig);
 
     // Restore project attribution to fused results
-    return fused.map((result) => {
-      const projectInfo = projectLookup.get(result.id);
-      return {
-        ...result,
-        // Use lookup if available, otherwise fallback to result's own values
-        // (defensive coding - shouldn't happen but handles edge cases)
-        projectId: projectInfo?.projectId ?? (result as MultiProjectSearchResult).projectId ?? '',
-        projectName: projectInfo?.projectName ?? (result as MultiProjectSearchResult).projectName ?? '',
-      };
-    });
+    return this.restoreProjectAttribution(fused, projectLookup);
   }
 
   // ==========================================================================
