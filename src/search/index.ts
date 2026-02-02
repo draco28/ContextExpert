@@ -83,6 +83,13 @@ export {
   resetMultiProjectBM25StoreManager,
 } from './multi-project-bm25-store.js';
 
+// Store management - Multi-Project Fusion (combines Vector + BM25)
+export {
+  MultiProjectFusionService,
+  getMultiProjectFusionService,
+  resetMultiProjectFusionService,
+} from './multi-project-fusion.js';
+
 // Result formatting
 export {
   formatResult,
@@ -115,4 +122,8 @@ export type {
   MultiProjectSearchOptions,
   EmbeddingValidation,
   MultiProjectBM25LoadOptions,
+  // Multi-project fusion types
+  MultiProjectFusionLoadOptions,
+  MultiProjectFusionConfig,
+  MultiProjectFusionSearchOptions,
 } from './types.js';
