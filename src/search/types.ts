@@ -376,3 +376,20 @@ export interface EmbeddingValidation {
   /** Expected model name based on first project */
   expectedModel?: string | null;
 }
+
+// ============================================================================
+// Multi-Project BM25 Search Types
+// ============================================================================
+
+/**
+ * Options for loading multiple project BM25 retrievers.
+ *
+ * Unlike vector stores, BM25 doesn't require embedding validation since
+ * it uses text-based tokenization rather than fixed-dimension vectors.
+ */
+export interface MultiProjectBM25LoadOptions {
+  /** Project IDs to load */
+  projectIds: string[];
+  /** BM25 configuration (optional, uses defaults if not provided) */
+  bm25Config?: BM25Config;
+}
