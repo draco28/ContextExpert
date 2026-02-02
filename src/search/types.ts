@@ -274,6 +274,8 @@ export interface FormattedResultJSON {
   fileType: 'code' | 'docs' | 'config' | 'unknown';
   /** Project ID (included when showProject option is true) */
   projectId?: string;
+  /** Project name (included when showProject option is true) */
+  projectName?: string;
 }
 
 // ============================================================================

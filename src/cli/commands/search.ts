@@ -9,7 +9,8 @@
  *   ctx search "auth flow" --rerank      # Enable reranking for better precision
  *
  * Uses the existing search infrastructure:
- * - FusionService for hybrid search (RRF fusion of dense + BM25)
+ * - FusionService for single-project hybrid search (RRF fusion of dense + BM25)
+ * - MultiProjectFusionService for cross-project search (validates embedding compatibility)
  * - RerankerService for optional BGE cross-encoder reranking
  * - formatResults/formatResultsJSON for output formatting
  */
@@ -23,6 +24,8 @@ import { loadConfig } from '../../config/loader.js';
 import { createEmbeddingProvider } from '../../indexer/embedder/index.js';
 import {
   createFusionService,
+  getMultiProjectFusionService,
+  EmbeddingMismatchError,
   formatResults,
   formatResultsJSON,
   type SearchResultWithContext,
@@ -212,16 +215,6 @@ export function createSearchCommand(
 
       ctx.debug(`Searching ${projects.length} project(s): ${projectNames.join(', ')}`);
 
-      // Warn user if multiple projects were resolved but only one will be searched
-      if (isMultiProject) {
-        ctx.log(
-          chalk.yellow(
-            `Warning: Multi-project search not yet supported. ` +
-              `Searching only "${projects[0]!.name}".`
-          )
-        );
-      }
-
       // ─────────────────────────────────────────────────────────────────────
       // 4. Load config and create embedding provider
       // ─────────────────────────────────────────────────────────────────────
@@ -233,41 +226,80 @@ export function createSearchCommand(
           onProgress: (p) => ctx.debug(`Embedding init: ${p.status}`),
         });
 
-      // ─────────────────────────────────────────────────────────────────────
-      // 5. Create FusionService and execute search
-      // ─────────────────────────────────────────────────────────────────────
-      // FusionService is scoped to a single project's data store.
-      // Multi-project search would require loading stores for all projects.
-      // Pass dimensions from provider to ensure consistency with indexed data.
       ctx.debug(`Using model: ${embeddingModel} (${dimensions}d)`);
 
       // CLI --rerank flag overrides config.search.rerank
-      // If --rerank is specified, enable reranking; otherwise use config default
       const shouldRerank = cmdOptions.rerank ?? config.search.rerank;
       ctx.debug(`Reranking: ${shouldRerank ? 'enabled' : 'disabled'}`);
 
-      const fusionService = createFusionService(
-        projects[0]!.id,
-        embeddingProvider,
-        { ...config.search, rerank: shouldRerank },
-        { denseOptions: { dimensions } }
-      );
+      // ─────────────────────────────────────────────────────────────────────
+      // 5. Execute search (single-project vs multi-project paths)
+      // ─────────────────────────────────────────────────────────────────────
+      let results: SearchResultWithContext[];
 
-      ctx.debug('Initializing search index...');
-      if (shouldRerank) {
-        ctx.debug('Warming up BGE reranker model (runs in parallel with index loading)...');
+      if (isMultiProject) {
+        // ─────────────────────────────────────────────────────────────────
+        // Multi-project path: Use MultiProjectFusionService
+        // ─────────────────────────────────────────────────────────────────
+        const multiProjectService = getMultiProjectFusionService({
+          rerank: shouldRerank,
+          rerankConfig: config.search.rerankConfig,
+        });
+
+        // Validate embedding model compatibility across all projects
+        const projectIds = projects.map((p) => String(p.id));
+        const validation = multiProjectService.validateProjects(projectIds);
+        if (!validation.valid) {
+          throw new EmbeddingMismatchError(validation);
+        }
+
+        // Load stores for all projects (vector + BM25 in parallel)
+        ctx.debug('Loading multi-project stores...');
+        if (shouldRerank) {
+          ctx.debug('Warming up BGE reranker model (runs in parallel with store loading)...');
+        }
+        await multiProjectService.loadProjects({ projectIds, dimensions }, (progress) => {
+          ctx.debug(`${progress.projectName}: ${progress.phase} ${progress.loaded}/${progress.total}`);
+        });
+
+        // Generate query embedding for dense search
+        ctx.debug('Generating query embedding...');
+        const queryEmbedding = await embeddingProvider.embed(trimmedQuery);
+
+        // Execute cross-project hybrid search
+        ctx.debug(`Executing multi-project hybrid search${shouldRerank ? ' with reranking' : ''}...`);
+        const multiResults = await multiProjectService.search(trimmedQuery, queryEmbedding, {
+          topK,
+        });
+
+        // Convert MultiProjectSearchResult[] to SearchResultWithContext[]
+        // Copy projectId/projectName to metadata for formatter compatibility
+        results = multiResults.map((r) => ({
+          ...r,
+          metadata: { ...r.metadata, projectId: r.projectId, projectName: r.projectName },
+        }));
+      } else {
+        // ─────────────────────────────────────────────────────────────────
+        // Single-project path: Use existing FusionService
+        // ─────────────────────────────────────────────────────────────────
+        const fusionService = createFusionService(
+          projects[0]!.id,
+          embeddingProvider,
+          { ...config.search, rerank: shouldRerank },
+          { denseOptions: { dimensions } }
+        );
+
+        ctx.debug('Initializing search index...');
+        if (shouldRerank) {
+          ctx.debug('Warming up BGE reranker model (runs in parallel with index loading)...');
+        }
+        await fusionService.ensureInitialized((progress) => {
+          ctx.debug(`Index: ${progress.phase} ${progress.loaded}/${progress.total}`);
+        });
+
+        ctx.debug(`Executing hybrid search${shouldRerank ? ' with reranking' : ''}...`);
+        results = await fusionService.search(trimmedQuery, { topK });
       }
-      await fusionService.ensureInitialized((progress) => {
-        ctx.debug(`Index: ${progress.phase} ${progress.loaded}/${progress.total}`);
-      });
-
-      ctx.debug(`Executing hybrid search${shouldRerank ? ' with reranking' : ''}...`);
-      // Note: FusionService is already scoped to the first project's data.
-      // Multi-project search would require loading all project stores.
-      // For now, we search the first project (single-project mode effective).
-      const results: SearchResultWithContext[] = await fusionService.search(trimmedQuery, {
-        topK,
-      });
 
       ctx.debug(`Found ${results.length} results`);
 

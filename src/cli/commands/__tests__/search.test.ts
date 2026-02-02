@@ -40,6 +40,27 @@ vi.mock('../../../indexer/embedder/index.js', () => ({
 // Mock the search module
 vi.mock('../../../search/index.js', () => ({
   createFusionService: vi.fn(),
+  getMultiProjectFusionService: vi.fn(),
+  EmbeddingMismatchError: class EmbeddingMismatchError extends Error {
+    public readonly validation: {
+      valid: boolean;
+      errors?: Array<{ projectId: string; projectName: string }>;
+      expectedModel?: string;
+      expectedDimensions?: number;
+    };
+
+    constructor(validation: {
+      valid: boolean;
+      errors?: Array<{ projectId: string; projectName: string }>;
+      expectedModel?: string;
+      expectedDimensions?: number;
+    }) {
+      const names = validation.errors?.map((p) => p.projectName).join(', ') ?? '';
+      super(`Cannot search across projects with different embedding models: ${names}`);
+      this.name = 'EmbeddingMismatchError';
+      this.validation = validation;
+    }
+  },
   formatResults: vi.fn(),
   formatResultsJSON: vi.fn(),
 }));
@@ -50,6 +71,11 @@ describe('createSearchCommand', () => {
   let errorOutput: string[];
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let mockDb: { prepare: ReturnType<typeof vi.fn> };
+  let mockMultiProjectService: {
+    validateProjects: ReturnType<typeof vi.fn>;
+    loadProjects: ReturnType<typeof vi.fn>;
+    search: ReturnType<typeof vi.fn>;
+  };
   let mockFusionService: {
     ensureInitialized: ReturnType<typeof vi.fn>;
     search: ReturnType<typeof vi.fn>;
@@ -130,7 +156,7 @@ describe('createSearchCommand', () => {
     // Set up mock embedding provider (returns new EmbeddingProviderResult structure)
     vi.mocked(embedder.createEmbeddingProvider).mockResolvedValue({
       provider: {
-        embed: vi.fn(),
+        embed: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)), // Mock embedding vector
         embedBatch: vi.fn(),
         dimensions: 1024,
       },
@@ -145,6 +171,20 @@ describe('createSearchCommand', () => {
     };
     vi.mocked(searchModule.createFusionService).mockReturnValue(
       mockFusionService as unknown as ReturnType<typeof searchModule.createFusionService>
+    );
+
+    // Set up mock multi-project fusion service
+    mockMultiProjectService = {
+      validateProjects: vi.fn().mockReturnValue({ valid: true }),
+      loadProjects: vi.fn().mockResolvedValue(undefined),
+      search: vi.fn().mockResolvedValue(mockSearchResults.map((r) => ({
+        ...r,
+        projectId: r.metadata.projectId,
+        projectName: 'test-project',
+      }))),
+    };
+    vi.mocked(searchModule.getMultiProjectFusionService).mockReturnValue(
+      mockMultiProjectService as unknown as ReturnType<typeof searchModule.getMultiProjectFusionService>
     );
 
     // Set up mock formatters
@@ -629,16 +669,19 @@ describe('createSearchCommand', () => {
       });
     });
 
-    it('searches first project when multiple exist (single-project mode)', async () => {
+    it('uses MultiProjectFusionService when multiple projects exist', async () => {
       const cmd = createSearchCommand(() => mockContext);
 
       const program = new Command();
       program.addCommand(cmd);
       await program.parseAsync(['node', 'test', 'search', 'query']);
 
-      // FusionService is created with first project; multi-project search not yet supported
-      expect(mockFusionService.search).toHaveBeenCalledWith(
+      // MultiProjectFusionService is used for multi-project search
+      expect(mockMultiProjectService.validateProjects).toHaveBeenCalledWith(['proj-1', 'proj-2']);
+      expect(mockMultiProjectService.loadProjects).toHaveBeenCalled();
+      expect(mockMultiProjectService.search).toHaveBeenCalledWith(
         'query',
+        expect.any(Array), // query embedding
         expect.objectContaining({ topK: 10 })
       );
     });
