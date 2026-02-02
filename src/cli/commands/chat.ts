@@ -728,6 +728,19 @@ function getMostRecentProject(): Project | undefined {
 }
 
 /**
+ * Check if any projects exist in the database.
+ * Used to differentiate "no projects indexed" from "projects exist but none valid".
+ */
+function hasAnyProjects(): boolean {
+  runMigrations();
+  const db = getDb();
+  const result = db
+    .prepare('SELECT COUNT(*) as count FROM projects')
+    .get() as { count: number } | undefined;
+  return (result?.count ?? 0) > 0;
+}
+
+/**
  * Parse user input to detect REPL commands.
  * Returns null if it's a regular question.
  *
@@ -908,8 +921,16 @@ function displayWelcome(state: ChatState, ctx: CommandContext): void {
   if (state.currentProject) {
     ctx.log(chalk.blue(`Focused on: ${state.currentProject.name}`));
   } else {
-    ctx.log(chalk.dim('No project focused (pure LLM mode)'));
-    ctx.log(chalk.dim('Use /focus <project> to enable RAG search'));
+    // Check if there are ANY projects in the database
+    if (hasAnyProjects()) {
+      // Projects exist but none are focused (maybe paths missing)
+      ctx.log(chalk.dim('No project focused (pure LLM mode)'));
+      ctx.log(chalk.dim('Use /focus <project> to enable RAG search'));
+    } else {
+      // No projects at all - show helpful onboarding message
+      ctx.log(chalk.yellow('No projects indexed.'));
+      ctx.log(chalk.dim('Use /index <path> to get started.'));
+    }
   }
 
   ctx.log('');
@@ -1116,9 +1137,15 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         // Try to use the most recent project as default
         const recent = getMostRecentProject();
         if (recent) {
-          currentProject = recent;
-          ragEngine = await createRAGEngine(config, String(recent.id));
-          ctx.debug(`Using most recent project: ${recent.name}`);
+          // Validate that the project path still exists on disk
+          if (!existsSync(recent.path)) {
+            // Path no longer exists - don't auto-focus on stale project
+            ctx.debug(`Skipping stale project: ${recent.name} (path missing: ${recent.path})`);
+          } else {
+            currentProject = recent;
+            ragEngine = await createRAGEngine(config, String(recent.id));
+            ctx.debug(`Using most recent project: ${recent.name}`);
+          }
         }
       }
 

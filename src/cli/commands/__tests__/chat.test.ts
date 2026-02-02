@@ -20,6 +20,7 @@ import * as database from '../../../database/index.js';
 import * as configLoader from '../../../config/loader.js';
 import * as ragEngine from '../../../agent/rag-engine.js';
 import * as llmProvider from '../../../providers/llm.js';
+import * as fs from 'node:fs';
 
 // Mock the database module
 vi.mock('../../../database/index.js', () => ({
@@ -39,6 +40,11 @@ vi.mock('../../../utils/path-validation.js', () => ({
     normalizedPath: '/test/path',
     warnings: [],
   }),
+}));
+
+// Mock node:fs for existsSync
+vi.mock('node:fs', () => ({
+  existsSync: vi.fn().mockReturnValue(true),
 }));
 
 // Mock progress reporter
@@ -152,11 +158,18 @@ describe('createChatCommand', () => {
       error: (msg: string) => errorOutput.push(msg),
     };
 
-    // Mock database
+    // Mock database - handle different queries
     mockDb = {
-      prepare: vi.fn().mockReturnValue({
-        get: vi.fn().mockReturnValue(mockProject),
-        all: vi.fn().mockReturnValue([mockProject]),
+      prepare: vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) {
+          // hasAnyProjects() query - by default, project exists
+          return { get: vi.fn().mockReturnValue({ count: 1 }) };
+        }
+        // Default: return mock project
+        return {
+          get: vi.fn().mockReturnValue(mockProject),
+          all: vi.fn().mockReturnValue([mockProject]),
+        };
       }),
     };
     vi.mocked(database.getDb).mockReturnValue(
@@ -193,6 +206,9 @@ describe('createChatCommand', () => {
       name: 'ollama',
       model: 'llama3.2',
     } as unknown as Awaited<ReturnType<typeof llmProvider.createLLMProvider>>);
+
+    // Mock fs.existsSync to return true by default (valid project paths)
+    vi.mocked(fs.existsSync).mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -288,10 +304,18 @@ describe('createChatCommand', () => {
     });
 
     it('works without any projects (pure LLM mode)', async () => {
-      // Mock no projects
-      mockDb.prepare = vi.fn().mockReturnValue({
-        get: vi.fn().mockReturnValue(undefined),
-        all: vi.fn().mockReturnValue([]),
+      // Mock no projects - need to handle different queries:
+      // - getMostRecentProject: returns undefined
+      // - hasAnyProjects (COUNT query): returns { count: 0 }
+      mockDb.prepare = vi.fn().mockImplementation((sql: string) => {
+        if (sql.includes('COUNT(*)')) {
+          return { get: vi.fn().mockReturnValue({ count: 0 }) };
+        }
+        // Default: no project found
+        return {
+          get: vi.fn().mockReturnValue(undefined),
+          all: vi.fn().mockReturnValue([]),
+        };
       });
 
       const command = createChatCommand(() => mockContext);
@@ -301,6 +325,38 @@ describe('createChatCommand', () => {
 
       // RAG engine should not be created
       expect(ragEngine.createRAGEngine).not.toHaveBeenCalled();
+    });
+
+    it('skips stale project when path does not exist', async () => {
+      // Mock existsSync to return false (path doesn't exist)
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const command = createChatCommand(() => mockContext);
+
+      await command.parseAsync(['node', 'test']);
+
+      // RAG engine should NOT be created for stale project
+      expect(ragEngine.createRAGEngine).not.toHaveBeenCalled();
+
+      // Should log debug message about skipping
+      expect(mockContext.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Skipping stale project')
+      );
+    });
+
+    it('auto-focuses on valid project when path exists', async () => {
+      // Mock existsSync to return true (path exists)
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+
+      const command = createChatCommand(() => mockContext);
+
+      await command.parseAsync(['node', 'test']);
+
+      // RAG engine SHOULD be created for valid project
+      expect(ragEngine.createRAGEngine).toHaveBeenCalledWith(
+        mockConfig,
+        'proj-123'
+      );
     });
   });
 
