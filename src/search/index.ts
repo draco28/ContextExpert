@@ -69,12 +69,19 @@ export {
   resetBM25StoreManager,
 } from './bm25-store.js';
 
-// Store management - Multi-Project
+// Store management - Multi-Project Vector
 export {
   MultiProjectVectorStoreManager,
   getMultiProjectVectorStoreManager,
   resetMultiProjectVectorStoreManager,
 } from './multi-project-store.js';
+
+// Store management - Multi-Project BM25
+export {
+  MultiProjectBM25StoreManager,
+  getMultiProjectBM25StoreManager,
+  resetMultiProjectBM25StoreManager,
+} from './multi-project-bm25-store.js';
 
 // Result formatting
 export {
@@ -107,4 +114,5 @@ export type {
   MultiProjectSearchResult,
   MultiProjectSearchOptions,
   EmbeddingValidation,
+  MultiProjectBM25LoadOptions,
 } from './types.js';
