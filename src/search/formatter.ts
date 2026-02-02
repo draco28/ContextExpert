@@ -131,8 +131,10 @@ export function formatResult(
   }
 
   // Project prefix (for cross-project searches)
-  if (showProject && result.metadata.projectId) {
-    parts.push(`[${result.metadata.projectId}]`);
+  // Prefer projectName for human readability, fallback to projectId
+  const projectLabel = result.metadata.projectName ?? result.metadata.projectId;
+  if (showProject && projectLabel) {
+    parts.push(`[${projectLabel}]`);
   }
 
   // File path with optional line numbers
@@ -202,9 +204,14 @@ export function formatResultJSON(
     fileType: result.fileType,
   };
 
-  // Include projectId only when cross-project display is enabled
-  if (options.showProject && result.metadata.projectId) {
-    formatted.projectId = result.metadata.projectId as string;
+  // Include project info when cross-project display is enabled
+  if (options.showProject) {
+    if (result.metadata.projectId) {
+      formatted.projectId = result.metadata.projectId as string;
+    }
+    if (result.metadata.projectName) {
+      formatted.projectName = result.metadata.projectName as string;
+    }
   }
 
   return formatted;
