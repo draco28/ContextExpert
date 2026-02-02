@@ -57,6 +57,7 @@ import type {
   EmbeddingValidation,
   SearchServiceOptions,
 } from './types.js';
+import { EmbeddingMismatchError } from './errors.js';
 
 /**
  * Multi-Project Vector Store Manager
@@ -179,6 +180,16 @@ export class MultiProjectVectorStoreManager {
     onProgress?: (progress: MultiProjectLoadProgress) => void
   ): Promise<Map<string, InMemoryVectorStore>> {
     const { projectIds, dimensions, useHNSW = true, hnswConfig } = options;
+
+    // Validate embedding compatibility for cross-project search (2+ projects)
+    // Single-project loads skip validation since there's nothing to compare
+    if (projectIds.length > 1) {
+      const validation = this.validateProjects(projectIds);
+      if (!validation.valid) {
+        throw new EmbeddingMismatchError(validation);
+      }
+    }
+
     const stores = new Map<string, InMemoryVectorStore>();
 
     for (let i = 0; i < projectIds.length; i++) {

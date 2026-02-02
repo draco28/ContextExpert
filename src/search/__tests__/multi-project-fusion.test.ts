@@ -16,6 +16,7 @@ import {
   getMultiProjectFusionService,
   resetMultiProjectFusionService,
 } from '../multi-project-fusion.js';
+import { EmbeddingMismatchError } from '../errors.js';
 import type {
   MultiProjectSearchResult,
   EmbeddingValidation,
@@ -100,6 +101,13 @@ describe('MultiProjectFusionService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetMultiProjectFusionService();
+
+    // Default to valid validation (tests that need invalid should override)
+    mockVectorManager.validateProjects.mockReturnValue({
+      valid: true,
+      expectedDimensions: 1024,
+      expectedModel: 'BAAI/bge-large-en-v1.5',
+    });
 
     // Reset mock property
     Object.defineProperty(mockVectorManager, 'loadedProjectCount', {
@@ -283,6 +291,51 @@ describe('MultiProjectFusionService', () => {
         expect.anything(),
         onProgress
       );
+    });
+
+    it('should throw EmbeddingMismatchError when models mismatch', async () => {
+      const validation: EmbeddingValidation = {
+        valid: false,
+        errors: [
+          {
+            projectId: 'proj-2',
+            projectName: 'project-two',
+            embeddingModel: 'Xenova/nomic-embed-text-v1.5',
+            embeddingDimensions: 768,
+          },
+        ],
+        expectedDimensions: 1024,
+        expectedModel: 'BAAI/bge-large-en-v1.5',
+      };
+      mockVectorManager.validateProjects.mockReturnValue(validation);
+
+      const service = new MultiProjectFusionService();
+
+      await expect(
+        service.loadProjects({
+          projectIds: ['proj-1', 'proj-2'],
+          dimensions: 1024,
+        })
+      ).rejects.toThrow(EmbeddingMismatchError);
+
+      // Should NOT have called loadStores since validation failed
+      expect(mockVectorManager.loadStores).not.toHaveBeenCalled();
+      expect(mockBM25Manager.loadRetrievers).not.toHaveBeenCalled();
+    });
+
+    it('should skip validation for single project', async () => {
+      mockVectorManager.loadStores.mockResolvedValue(new Map());
+      mockBM25Manager.loadRetrievers.mockResolvedValue(new Map());
+
+      const service = new MultiProjectFusionService();
+
+      // Should NOT call validateProjects for single project
+      await service.loadProjects({
+        projectIds: ['proj-1'],
+        dimensions: 1024,
+      });
+
+      expect(mockVectorManager.validateProjects).not.toHaveBeenCalled();
     });
   });
 

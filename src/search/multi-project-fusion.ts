@@ -59,6 +59,7 @@ import type {
   FusionConfig,
   SearchResultWithContext,
 } from './types.js';
+import { EmbeddingMismatchError } from './errors.js';
 
 /**
  * Project attribution lookup map type.
@@ -148,6 +149,15 @@ export class MultiProjectFusionService {
     onProgress?: (progress: MultiProjectLoadProgress) => void
   ): Promise<void> {
     const { projectIds, dimensions, useHNSW, hnswConfig, bm25Config } = options;
+
+    // Validate embedding compatibility for cross-project search (2+ projects)
+    // This is a fail-fast check before we start loading any stores
+    if (projectIds.length > 1) {
+      const validation = this.validateProjects(projectIds);
+      if (!validation.valid) {
+        throw new EmbeddingMismatchError(validation);
+      }
+    }
 
     // Load both managers in parallel for better performance
     // This is why we use Promise.all instead of sequential loading
