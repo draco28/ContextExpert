@@ -132,6 +132,15 @@ ALTER TABLE projects ADD COLUMN embedding_dimensions INTEGER DEFAULT 1024;
 CREATE INDEX IF NOT EXISTS idx_projects_embedding_model ON projects(embedding_model);
     `.trim(),
   },
+  {
+    name: '003-add-project-description.sql',
+    sql: `
+-- Migration 003: Add Project Description
+-- Adds a description field for smart query routing in Phase 3 of chat-first experience
+-- The LLM project router will use this to make better routing decisions
+ALTER TABLE projects ADD COLUMN description TEXT;
+    `.trim(),
+  },
 ];
 
 /**

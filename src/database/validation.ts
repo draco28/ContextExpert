@@ -47,6 +47,7 @@ export const ProjectRowSchema = z.object({
   embedding_model: z.string().nullable(),
   // Default matches the migration's DEFAULT 1024
   embedding_dimensions: z.number().int().positive().default(1024),
+  description: z.string().nullable(),
 });
 
 /** Type inferred from ProjectRowSchema (should match Project interface) */
