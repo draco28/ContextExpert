@@ -15,7 +15,8 @@
  * - Each project has its own InMemoryVectorStore (per VectorStoreManager)
  * - Search runs in parallel across all loaded stores
  * - Results are merged using RRF, same algorithm as FusionService
- * - projectId is injected at search time (not stored in chunk metadata)
+ * - projectId available from two sources: chunk metadata (for filtering) and
+ *   explicit injection at search time (for MultiProjectSearchResult attribution)
  *
  * @example
  * ```typescript
