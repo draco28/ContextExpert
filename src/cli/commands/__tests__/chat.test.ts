@@ -728,4 +728,85 @@ describe('parseREPLCommand - /index', () => {
       expect(result?.command.name).toBe('index');
     });
   });
+
+  describe('/index status subcommand', () => {
+    it('parses /index status', () => {
+      const result = parseREPLCommand('/index status');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('index');
+      expect(result?.args).toEqual(['status']);
+    });
+
+    it('parses /i status (alias)', () => {
+      const result = parseREPLCommand('/i status');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('index');
+      expect(result?.args).toEqual(['status']);
+    });
+
+    it('is case-insensitive for status', () => {
+      const result = parseREPLCommand('/index STATUS');
+      expect(result).not.toBeNull();
+      expect(result?.args).toEqual(['STATUS']);
+    });
+  });
+});
+
+describe('parseIndexArgs - status subcommand', () => {
+  describe('status detection', () => {
+    it('recognizes status as subcommand', () => {
+      const result = parseIndexArgs(['status']);
+      expect(result).toEqual({
+        path: '',
+        name: undefined,
+        force: false,
+        subcommand: 'status',
+      });
+    });
+
+    it('is case-insensitive for status', () => {
+      const result = parseIndexArgs(['STATUS']);
+      expect(result.subcommand).toBe('status');
+    });
+
+    it('recognizes Status (mixed case)', () => {
+      const result = parseIndexArgs(['Status']);
+      expect(result.subcommand).toBe('status');
+    });
+
+    it('prioritizes status over path parsing', () => {
+      // Even though 'status' could theoretically be a path, treat it as subcommand
+      const result = parseIndexArgs(['status']);
+      expect(result.subcommand).toBe('status');
+      expect(result.path).toBe('');
+    });
+
+    it('ignores additional args after status', () => {
+      // /index status --force should just be status (no force flag)
+      const result = parseIndexArgs(['status', '--force']);
+      expect(result.subcommand).toBe('status');
+      expect(result.force).toBe(false);
+    });
+  });
+
+  describe('path vs status disambiguation', () => {
+    it('treats ./status as path, not subcommand', () => {
+      const result = parseIndexArgs(['./status']);
+      expect(result.subcommand).toBeUndefined();
+      expect(result.path).toBe('./status');
+    });
+
+    it('treats /path/to/status as path', () => {
+      const result = parseIndexArgs(['/path/to/status']);
+      expect(result.subcommand).toBeUndefined();
+      expect(result.path).toBe('/path/to/status');
+    });
+
+    it('treats status-app as path', () => {
+      // Starts with "status" but not exactly "status"
+      const result = parseIndexArgs(['status-app']);
+      expect(result.subcommand).toBeUndefined();
+      expect(result.path).toBe('status-app');
+    });
+  });
 });
