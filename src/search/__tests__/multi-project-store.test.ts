@@ -16,6 +16,7 @@ import {
   resetMultiProjectVectorStoreManager,
 } from '../multi-project-store.js';
 import { resetVectorStoreManager } from '../store.js';
+import { EmbeddingMismatchError } from '../errors.js';
 import type { Project } from '../../database/schema.js';
 
 // Mock dependencies
@@ -256,9 +257,13 @@ describe('MultiProjectVectorStoreManager', () => {
       const project1 = createMockProject('proj-1', 'project-one');
       const project2 = createMockProject('proj-2', 'project-two');
 
-      mockDbOps.getProjectById
-        .mockReturnValueOnce(project1)
-        .mockReturnValueOnce(project2);
+      // Use mockImplementation to return correct project based on ID
+      // This handles both validation calls and loading calls
+      mockDbOps.getProjectById.mockImplementation((id: string) => {
+        if (id === 'proj-1') return project1;
+        if (id === 'proj-2') return project2;
+        return undefined;
+      });
 
       // Mock getStore to call the progress callback
       mockStoreManager.getStore.mockImplementation(
@@ -314,6 +319,63 @@ describe('MultiProjectVectorStoreManager', () => {
 
       expect(manager.hasProjectStore('proj-1')).toBe(true);
       expect(manager.getLoadedProjects()).toEqual(['proj-1']);
+    });
+
+    it('should throw EmbeddingMismatchError when models mismatch', async () => {
+      const project1 = createMockProject('proj-1', 'project-one', {
+        embeddingModel: 'BAAI/bge-large-en-v1.5',
+      });
+      const project2 = createMockProject('proj-2', 'project-two', {
+        embeddingModel: 'Xenova/nomic-embed-text-v1.5', // Different!
+      });
+
+      mockDbOps.getProjectById
+        .mockReturnValueOnce(project1)
+        .mockReturnValueOnce(project2);
+
+      const manager = new MultiProjectVectorStoreManager();
+
+      await expect(
+        manager.loadStores({
+          projectIds: ['proj-1', 'proj-2'],
+          dimensions: 1024,
+        })
+      ).rejects.toThrow(EmbeddingMismatchError);
+    });
+
+    it('should throw EmbeddingMismatchError when dimensions mismatch', async () => {
+      const project1 = createMockProject('proj-1', 'project-one', {
+        embeddingDimensions: 1024,
+      });
+      const project2 = createMockProject('proj-2', 'project-two', {
+        embeddingDimensions: 768, // Different!
+      });
+
+      mockDbOps.getProjectById
+        .mockReturnValueOnce(project1)
+        .mockReturnValueOnce(project2);
+
+      const manager = new MultiProjectVectorStoreManager();
+
+      await expect(
+        manager.loadStores({
+          projectIds: ['proj-1', 'proj-2'],
+          dimensions: 1024,
+        })
+      ).rejects.toThrow(EmbeddingMismatchError);
+    });
+
+    it('should skip validation for single project', async () => {
+      const project = createMockProject('proj-1', 'project-one');
+      mockDbOps.getProjectById.mockReturnValue(project);
+      mockStoreManager.getStore.mockResolvedValue(createMockStore([]));
+
+      const manager = new MultiProjectVectorStoreManager();
+
+      // Should NOT throw - single project means nothing to compare
+      await expect(
+        manager.loadStores({ projectIds: ['proj-1'], dimensions: 1024 })
+      ).resolves.toBeDefined();
     });
   });
 

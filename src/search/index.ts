@@ -127,3 +127,6 @@ export type {
   MultiProjectFusionConfig,
   MultiProjectFusionSearchOptions,
 } from './types.js';
+
+// Error types
+export { EmbeddingMismatchError } from './errors.js';
