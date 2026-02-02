@@ -520,6 +520,118 @@ describe('MultiProjectVectorStoreManager', () => {
         })
       );
     });
+
+    it('should handle external cache invalidation gracefully', async () => {
+      const project1 = createMockProject('proj-1', 'project-one');
+      const project2 = createMockProject('proj-2', 'project-two');
+
+      mockDbOps.getProjectById.mockImplementation((id: string) => {
+        if (id === 'proj-1') return project1;
+        if (id === 'proj-2') return project2;
+        return undefined;
+      });
+
+      const store1 = createMockStore([
+        { id: 'c1', content: 'chunk 1', score: 0.9 },
+      ]);
+      const store2 = createMockStore([
+        { id: 'c2', content: 'chunk 2', score: 0.8 },
+      ]);
+
+      mockStoreManager.getStore.mockImplementation(
+        async (options: { projectId: string }) => {
+          if (options.projectId === 'proj-1') return store1;
+          if (options.projectId === 'proj-2') return store2;
+          return undefined;
+        }
+      );
+
+      const manager = new MultiProjectVectorStoreManager();
+      await manager.loadStores({
+        projectIds: ['proj-1', 'proj-2'],
+        dimensions: 1024,
+      });
+
+      // Simulate external invalidation - proj-1's store was cleared
+      mockStoreManager.hasStore.mockImplementation((id: string) => id !== 'proj-1');
+
+      const queryEmbedding = new Array(1024).fill(0.1);
+      const results = await manager.search(queryEmbedding);
+
+      // Should only get results from proj-2 (proj-1 was skipped due to invalidation)
+      expect(results.length).toBe(1);
+      expect(results[0]!.projectId).toBe('proj-2');
+    });
+
+    it('should handle concurrent search requests', async () => {
+      const project = createMockProject('proj-1', 'project-one');
+      mockDbOps.getProjectById.mockReturnValue(project);
+
+      const store = createMockStore([
+        { id: 'c1', content: 'chunk 1', score: 0.9 },
+      ]);
+      mockStoreManager.getStore.mockResolvedValue(store);
+      mockStoreManager.hasStore.mockReturnValue(true);
+
+      const manager = new MultiProjectVectorStoreManager();
+      await manager.loadStores({
+        projectIds: ['proj-1'],
+        dimensions: 1024,
+      });
+
+      const queryEmbedding = new Array(1024).fill(0.1);
+
+      // Run multiple searches concurrently
+      const [results1, results2, results3] = await Promise.all([
+        manager.search(queryEmbedding),
+        manager.search(queryEmbedding),
+        manager.search(queryEmbedding),
+      ]);
+
+      // All should complete successfully with same results
+      expect(results1.length).toBe(1);
+      expect(results2.length).toBe(1);
+      expect(results3.length).toBe(1);
+      expect(results1[0]!.id).toBe(results2[0]!.id);
+      expect(results2[0]!.id).toBe(results3[0]!.id);
+    });
+
+    it('should skip stores that fail during getStore in search', async () => {
+      const project1 = createMockProject('proj-1', 'project-one');
+      const project2 = createMockProject('proj-2', 'project-two');
+
+      mockDbOps.getProjectById.mockImplementation((id: string) => {
+        if (id === 'proj-1') return project1;
+        if (id === 'proj-2') return project2;
+        return undefined;
+      });
+
+      const store2 = createMockStore([
+        { id: 'c2', content: 'chunk 2', score: 0.8 },
+      ]);
+
+      // First project's store throws, second succeeds
+      mockStoreManager.getStore.mockImplementation(
+        async (options: { projectId: string }) => {
+          if (options.projectId === 'proj-1') {
+            throw new Error('Store rebuild failed');
+          }
+          return store2;
+        }
+      );
+
+      mockStoreManager.hasStore.mockReturnValue(true);
+
+      const manager = new MultiProjectVectorStoreManager();
+
+      // Load stores - proj-1 will fail
+      await expect(
+        manager.loadStores({
+          projectIds: ['proj-1', 'proj-2'],
+          dimensions: 1024,
+        })
+      ).rejects.toThrow('Store rebuild failed');
+    });
   });
 
   // ==========================================================================

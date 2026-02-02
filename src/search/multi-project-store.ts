@@ -262,14 +262,16 @@ export class MultiProjectVectorStoreManager {
     // Search all loaded projects in parallel
     const searchPromises = Array.from(this.loadedProjects.entries()).map(
       async ([projectId, projectInfo]) => {
-        // Check if store is actually cached
+        // Defensive check: Skip projects whose stores were invalidated externally
+        // (e.g., by resetVectorStoreManager() or invalidate()) between loadStores()
+        // and this search call. This prevents errors and gracefully degrades results.
         if (!this.storeManager.hasStore(projectId)) {
-          // Store not loaded - skip (defensive)
           return;
         }
 
-        // Get the cached store
-        // Since hasStore returned true, we know this will return immediately
+        // Get the cached store. Note: If external code called invalidate() between
+        // our hasStore() check and now, this will trigger a rebuild. This is safe
+        // but may have performance implications in concurrent scenarios.
         const store = await this.storeManager.getStore({
           projectId,
           dimensions: projectInfo.dimensions,
