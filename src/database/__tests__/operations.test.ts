@@ -24,6 +24,7 @@ describe('DatabaseOperations', () => {
   let testDb: Database.Database;
 
   // Create migration SQL inline for testing
+  // NOTE: Keep in sync with migrations in migrate.ts
   const createTablesSql = `
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
@@ -35,7 +36,10 @@ describe('DatabaseOperations', () => {
       updated_at TEXT,
       file_count INTEGER DEFAULT 0,
       chunk_count INTEGER DEFAULT 0,
-      config TEXT
+      config TEXT,
+      embedding_model TEXT,
+      embedding_dimensions INTEGER DEFAULT 1024,
+      description TEXT
     );
 
     CREATE TABLE IF NOT EXISTS chunks (

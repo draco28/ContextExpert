@@ -39,6 +39,8 @@ export interface Project {
   embedding_model: string | null;
   /** Embedding dimensions (default: 1024 for BGE-large) */
   embedding_dimensions: number;
+  /** Optional description for smart query routing (e.g., "Main API server with auth and payments") */
+  description: string | null;
 }
 
 /**

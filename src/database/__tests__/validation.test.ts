@@ -35,10 +35,35 @@ describe('Validation Schemas', () => {
         config: null,
         embedding_model: 'BAAI/bge-large-en-v1.5',
         embedding_dimensions: 1024,
+        description: null,
       };
 
       const result = ProjectRowSchema.safeParse(row);
       expect(result.success).toBe(true);
+    });
+
+    it('should accept description as string or null', () => {
+      const rowWithDescription = {
+        id: 'proj-123',
+        name: 'test-project',
+        path: '/path/to/project',
+        tags: null,
+        ignore_patterns: null,
+        indexed_at: null,
+        updated_at: null,
+        file_count: 0,
+        chunk_count: 0,
+        config: null,
+        embedding_model: null,
+        embedding_dimensions: 1024,
+        description: 'Main API server with auth and payments',
+      };
+
+      const result = ProjectRowSchema.safeParse(rowWithDescription);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.description).toBe('Main API server with auth and payments');
+      }
     });
 
     it('should reject missing required fields', () => {
@@ -65,6 +90,7 @@ describe('Validation Schemas', () => {
         chunk_count: 0,
         config: null,
         embedding_model: null,
+        description: null,
         // embedding_dimensions not provided - should default to 1024
       };
 
@@ -147,6 +173,7 @@ describe('Validation Utilities', () => {
         config: null,
         embedding_model: null,
         embedding_dimensions: 1024,
+        description: null,
       };
 
       const result = validateRow(ProjectRowSchema, row, 'test-context');
@@ -289,6 +316,7 @@ describe('Performance Benchmarks', () => {
       config: null,
       embedding_model: 'BAAI/bge-large-en-v1.5',
       embedding_dimensions: 1024,
+      description: i % 2 === 0 ? `Project ${i} description` : null,
     }));
 
     // Benchmark validation only

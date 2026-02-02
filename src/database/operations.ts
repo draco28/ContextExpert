@@ -34,6 +34,8 @@ export interface ProjectUpsertInput {
   embeddingModel?: string;
   /** Embedding dimensions (default: 1024) */
   embeddingDimensions?: number;
+  /** Optional description for smart query routing */
+  description?: string;
 }
 
 /**
@@ -103,8 +105,8 @@ export class DatabaseOperations {
     const now = new Date().toISOString();
 
     const stmt = this.db.prepare(`
-      INSERT INTO projects (id, name, path, tags, ignore_patterns, indexed_at, updated_at, file_count, chunk_count, config, embedding_model, embedding_dimensions)
-      VALUES (@id, @name, @path, @tags, @ignorePatterns, @now, @now, 0, 0, NULL, @embeddingModel, @embeddingDimensions)
+      INSERT INTO projects (id, name, path, tags, ignore_patterns, indexed_at, updated_at, file_count, chunk_count, config, embedding_model, embedding_dimensions, description)
+      VALUES (@id, @name, @path, @tags, @ignorePatterns, @now, @now, 0, 0, NULL, @embeddingModel, @embeddingDimensions, @description)
       ON CONFLICT(id) DO UPDATE SET
         name = @name,
         path = @path,
@@ -113,7 +115,8 @@ export class DatabaseOperations {
         indexed_at = @now,
         updated_at = @now,
         embedding_model = COALESCE(@embeddingModel, embedding_model),
-        embedding_dimensions = COALESCE(@embeddingDimensions, embedding_dimensions)
+        embedding_dimensions = COALESCE(@embeddingDimensions, embedding_dimensions),
+        description = COALESCE(@description, description)
     `);
 
     stmt.run({
@@ -124,6 +127,7 @@ export class DatabaseOperations {
       ignorePatterns: input.ignorePatterns ? JSON.stringify(input.ignorePatterns) : null,
       embeddingModel: input.embeddingModel ?? null,
       embeddingDimensions: input.embeddingDimensions ?? 1024,
+      description: input.description ?? null,
       now,
     });
 
