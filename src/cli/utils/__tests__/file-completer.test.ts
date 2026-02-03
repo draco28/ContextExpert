@@ -28,13 +28,13 @@ vi.mock('../../../database/index.js', () => {
 
           // Handle getAllProjectFiles query (just projectId param)
           if (args.length === 1) {
-            return projectId === 1 ? testFilesProject1 : projectId === 2 ? testFilesProject2 : [];
+            return projectId === '1' ? testFilesProject1 : projectId === '2' ? testFilesProject2 : [];
           }
 
           // Handle completeFileName query (projectId, pattern, boostPattern, limit)
           const pattern = (args[1] as string).replace(/%/g, '').toLowerCase();
 
-          const files = projectId === 1 ? testFilesProject1 : projectId === 2 ? testFilesProject2 : [];
+          const files = projectId === '1' ? testFilesProject1 : projectId === '2' ? testFilesProject2 : [];
 
           return files.filter((f) => f.file_path.toLowerCase().includes(pattern));
         }),
@@ -46,7 +46,7 @@ vi.mock('../../../database/index.js', () => {
 describe('file-completer', () => {
   describe('completeFileName', () => {
     it('finds files matching partial name', () => {
-      const results = completeFileName(1, 'auth');
+      const results = completeFileName('1', 'auth');
 
       expect(results.length).toBeGreaterThan(0);
       expect(results.some((r) => r.fileName === 'auth.ts')).toBe(true);
@@ -54,39 +54,39 @@ describe('file-completer', () => {
     });
 
     it('returns full path in results', () => {
-      const results = completeFileName(1, 'auth.ts');
+      const results = completeFileName('1', 'auth.ts');
 
       const authFile = results.find((r) => r.fileName === 'auth.ts');
       expect(authFile?.fullPath).toBe('src/auth.ts');
     });
 
     it('matches anywhere in path (not just basename)', () => {
-      const results = completeFileName(1, 'oauth');
+      const results = completeFileName('1', 'oauth');
 
       expect(results.some((r) => r.fileName === 'oauth.ts')).toBe(true);
     });
 
     it('is case-insensitive', () => {
-      const results = completeFileName(1, 'AUTH');
+      const results = completeFileName('1', 'AUTH');
 
       expect(results.some((r) => r.fileName === 'auth.ts')).toBe(true);
     });
 
     it('returns empty for non-matching partial', () => {
-      const results = completeFileName(1, 'xyz123');
+      const results = completeFileName('1', 'xyz123');
 
       expect(results).toEqual([]);
     });
 
     it('only returns files from the specified project', () => {
-      const results = completeFileName(1, 'different');
+      const results = completeFileName('1', 'different');
 
       // 'different.ts' is in project 2, not project 1
       expect(results).toEqual([]);
     });
 
     it('returns files from correct project', () => {
-      const results = completeFileName(2, 'different');
+      const results = completeFileName('2', 'different');
 
       expect(results.some((r) => r.fileName === 'different.ts')).toBe(true);
     });
@@ -96,7 +96,7 @@ describe('file-completer', () => {
     it('returns deduplicated file names', () => {
       // auth.ts appears in src/ and tests/ (as auth.test.ts, different name)
       // but auth-helper.ts is only in src/utils/
-      const results = completeFileNames(1, 'auth');
+      const results = completeFileNames('1', 'auth');
 
       // Count occurrences of each name
       const counts = new Map<string, number>();
@@ -111,7 +111,7 @@ describe('file-completer', () => {
     });
 
     it('returns just file names (basenames)', () => {
-      const results = completeFileNames(1, 'index');
+      const results = completeFileNames('1', 'index');
 
       expect(results).toContain('index.ts');
       // Should not contain full path
@@ -121,7 +121,7 @@ describe('file-completer', () => {
 
   describe('getAllProjectFiles', () => {
     it('returns all files for a project', () => {
-      const results = getAllProjectFiles(1);
+      const results = getAllProjectFiles('1');
 
       expect(results.length).toBe(6); // 6 unique files in project 1
       expect(results).toContain('src/auth.ts');
@@ -129,14 +129,14 @@ describe('file-completer', () => {
     });
 
     it('only returns files from specified project', () => {
-      const results = getAllProjectFiles(2);
+      const results = getAllProjectFiles('2');
 
       expect(results.length).toBe(1);
       expect(results).toContain('src/different.ts');
     });
 
     it('returns empty for non-existent project', () => {
-      const results = getAllProjectFiles(999);
+      const results = getAllProjectFiles('999');
 
       expect(results).toEqual([]);
     });

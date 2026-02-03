@@ -1456,7 +1456,7 @@ function displayWelcome(state: ChatState, ctx: CommandContext): void {
  */
 export function createCompleter(
   getProjectNames: () => string[] = getAllProjectNames,
-  getCurrentProjectId: () => number | null = () => null
+  getCurrentProjectId: () => string | null = () => null
 ): (line: string) => [string[], string] {
   return (line: string): [string[], string] => {
     // Check for /focus or /f command with at least one space after

@@ -53,7 +53,7 @@ export interface FileCompletionResult {
  * ```
  */
 export function completeFileName(
-  projectId: number,
+  projectId: string,
   partial: string
 ): FileCompletionResult[] {
   try {
@@ -109,7 +109,7 @@ export function completeFileName(
  * @returns Array of matching file names
  */
 export function completeFileNames(
-  projectId: number,
+  projectId: string,
   partial: string
 ): string[] {
   const results = completeFileName(projectId, partial);
@@ -138,7 +138,7 @@ export function completeFileNames(
  * @param projectId - The project ID
  * @returns Array of all indexed file paths
  */
-export function getAllProjectFiles(projectId: number): string[] {
+export function getAllProjectFiles(projectId: string): string[] {
   try {
     runMigrations();
     const db = getDb();

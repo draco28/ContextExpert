@@ -168,7 +168,7 @@ async function exportConversation(
  */
 function formatConversationAsMarkdown(
   state: ChatState,
-  messages: Array<{ role: string; content: string }>
+  messages: Array<{ role: string; content: string | unknown[] }>
 ): string {
   const lines: string[] = [];
 
@@ -201,7 +201,10 @@ function formatConversationAsMarkdown(
     const roleLabel = message.role === 'user' ? 'User' : 'Assistant';
     lines.push(`## ${roleLabel}`);
     lines.push('');
-    lines.push(message.content);
+
+    // Handle content that can be string or array (ContentPart[])
+    const contentText = extractTextContent(message.content);
+    lines.push(contentText);
     lines.push('');
     lines.push('---');
     lines.push('');
@@ -212,6 +215,32 @@ function formatConversationAsMarkdown(
   lines.push(`*Exported from [Context Expert](https://github.com/contextexpert/cli) on ${formatDate(now)}*`);
 
   return lines.join('\n');
+}
+
+/**
+ * Extract text content from message content.
+ * Handles both simple string content and ContentPart arrays.
+ */
+function extractTextContent(content: string | unknown[]): string {
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  // ContentPart array - extract text from text parts
+  if (Array.isArray(content)) {
+    const textParts: string[] = [];
+    for (const part of content) {
+      if (typeof part === 'object' && part !== null) {
+        const p = part as { type?: string; text?: string };
+        if (p.type === 'text' && typeof p.text === 'string') {
+          textParts.push(p.text);
+        }
+      }
+    }
+    return textParts.join('\n');
+  }
+
+  return String(content);
 }
 
 /**

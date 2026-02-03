@@ -167,7 +167,7 @@ export function stripFileReferences(input: string): string {
  * @returns Array of resolved references with file content
  */
 export function resolveFileReferences(
-  projectId: number,
+  projectId: string,
   patterns: string[],
   options: ResolveOptions = {}
 ): ResolvedReference[] {
@@ -288,7 +288,7 @@ export function getReferenceSummary(resolved: ResolvedReference[]): string {
  * - Path contains pattern: 0.4
  */
 function findMatchingFiles(
-  projectId: number,
+  projectId: string,
   pattern: string,
   limit: number
 ): Omit<FileMatch, 'content'>[] {
@@ -364,7 +364,7 @@ function findMatchingFiles(
 /**
  * Get the full content of a file by concatenating its chunks.
  */
-function getFileContent(projectId: number, filePath: string): string {
+function getFileContent(projectId: string, filePath: string): string {
   try {
     runMigrations();
     const db = getDb();

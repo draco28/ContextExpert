@@ -125,7 +125,7 @@ describe('file-reference', () => {
 
   describe('resolveFileReferences', () => {
     it('resolves exact file name matches', () => {
-      const resolved = resolveFileReferences(1, ['auth.ts']);
+      const resolved = resolveFileReferences('1', ['auth.ts']);
 
       expect(resolved).toHaveLength(1);
       expect(resolved[0]!.pattern).toBe('auth.ts');
@@ -134,21 +134,21 @@ describe('file-reference', () => {
     });
 
     it('resolves partial matches', () => {
-      const resolved = resolveFileReferences(1, ['auth']);
+      const resolved = resolveFileReferences('1', ['auth']);
 
       expect(resolved).toHaveLength(1);
       expect(resolved[0]!.matches.length).toBeGreaterThan(1); // Multiple auth files
     });
 
     it('returns empty matches for non-existent files', () => {
-      const resolved = resolveFileReferences(1, ['nonexistent.xyz']);
+      const resolved = resolveFileReferences('1', ['nonexistent.xyz']);
 
       expect(resolved).toHaveLength(1);
       expect(resolved[0]!.matches).toHaveLength(0);
     });
 
     it('includes file content in matches', () => {
-      const resolved = resolveFileReferences(1, ['auth.ts']);
+      const resolved = resolveFileReferences('1', ['auth.ts']);
 
       const authMatch = resolved[0]!.matches.find((m) => m.filePath === 'src/auth.ts');
       expect(authMatch).toBeDefined();
@@ -156,7 +156,7 @@ describe('file-reference', () => {
     });
 
     it('respects maxMatchesPerPattern option', () => {
-      const resolved = resolveFileReferences(1, ['auth'], { maxMatchesPerPattern: 1 });
+      const resolved = resolveFileReferences('1', ['auth'], { maxMatchesPerPattern: 1 });
 
       expect(resolved[0]!.matches.length).toBe(1);
     });
@@ -164,7 +164,7 @@ describe('file-reference', () => {
 
   describe('formatReferencesAsContext', () => {
     it('formats resolved references as XML', () => {
-      const resolved = resolveFileReferences(1, ['auth.ts']);
+      const resolved = resolveFileReferences('1', ['auth.ts']);
       const formatted = formatReferencesAsContext(resolved);
 
       expect(formatted).toContain('<user_referenced_files>');
@@ -175,7 +175,7 @@ describe('file-reference', () => {
     });
 
     it('includes comment for unmatched references', () => {
-      const resolved = resolveFileReferences(1, ['nonexistent.ts']);
+      const resolved = resolveFileReferences('1', ['nonexistent.ts']);
       const formatted = formatReferencesAsContext(resolved);
 
       expect(formatted).toContain('<!-- @nonexistent.ts: No matching files found -->');
@@ -190,7 +190,7 @@ describe('file-reference', () => {
   describe('getReferenceSummary', () => {
     it('summarizes single match', () => {
       // Use full path for exact single match
-      const resolved = resolveFileReferences(1, ['src/auth.ts']);
+      const resolved = resolveFileReferences('1', ['src/auth.ts']);
       const summary = getReferenceSummary(resolved);
 
       expect(summary).toContain('@src/auth.ts');
@@ -198,14 +198,14 @@ describe('file-reference', () => {
     });
 
     it('shows "no matches" for unmatched patterns', () => {
-      const resolved = resolveFileReferences(1, ['nonexistent.xyz']);
+      const resolved = resolveFileReferences('1', ['nonexistent.xyz']);
       const summary = getReferenceSummary(resolved);
 
       expect(summary).toContain('@nonexistent.xyz: no matches');
     });
 
     it('shows count for multiple matches', () => {
-      const resolved = resolveFileReferences(1, ['auth']);
+      const resolved = resolveFileReferences('1', ['auth']);
       const summary = getReferenceSummary(resolved);
 
       // Should show "X files" when multiple matches

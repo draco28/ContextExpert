@@ -15,7 +15,7 @@
  */
 
 import { readdirSync, statSync } from 'node:fs';
-import { dirname, basename, join, resolve } from 'node:path';
+import { dirname, basename, join } from 'node:path';
 import { homedir } from 'node:os';
 
 /**
