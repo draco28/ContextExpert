@@ -68,6 +68,17 @@ import {
 import type { Project } from '../../database/schema.js';
 import { handleProviderCommand, createProviderFromConfig } from './provider-repl.js';
 import { getDefaultProvider } from '../../config/providers.js';
+import { completeDirectoryPath } from '../utils/path-completer.js';
+import { completeFileNames } from '../utils/file-completer.js';
+import {
+  parseFileReferences,
+  stripFileReferences,
+  resolveFileReferences,
+  formatReferencesAsContext,
+  getReferenceSummary,
+  type ResolvedReference,
+} from '../../search/file-reference.js';
+import { handleShareCommand } from './share-handler.js';
 
 // ============================================================================
 // Types
@@ -822,6 +833,13 @@ const REPL_COMMANDS: REPLCommand[] = [
     },
   },
   {
+    name: 'share',
+    aliases: [],
+    description: 'Export conversation to markdown file',
+    usage: '[path]',
+    handler: handleShareCommand,
+  },
+  {
     name: 'index',
     aliases: ['i'],
     description: 'Index a project directory for RAG search',
@@ -1085,6 +1103,40 @@ async function handleQuestion(
   let sources: RAGSource[] = [];
 
   // ─────────────────────────────────────────────────────────────────────────
+  // 0. Handle @file references (inject explicit file context)
+  // ─────────────────────────────────────────────────────────────────────────
+  let fileReferenceContext = '';
+  let resolvedReferences: ResolvedReference[] = [];
+  const filePatterns = parseFileReferences(question);
+
+  if (filePatterns.length > 0) {
+    // Need a project to resolve file references
+    if (state.currentProject) {
+      resolvedReferences = resolveFileReferences(state.currentProject.id, filePatterns);
+      fileReferenceContext = formatReferencesAsContext(resolvedReferences);
+
+      // Show user what files were matched
+      const summary = getReferenceSummary(resolvedReferences);
+      const hasMatches = resolvedReferences.some((r) => r.matches.length > 0);
+
+      if (hasMatches) {
+        ctx.log(chalk.cyan('Using: ') + chalk.dim(summary));
+      } else {
+        ctx.log(chalk.yellow('No files found matching: ') + filePatterns.join(', '));
+      }
+
+      // Strip @-references from question for cleaner RAG/LLM processing
+      question = stripFileReferences(question);
+      ctx.debug(`Stripped question: "${question}"`);
+    } else {
+      ctx.log(
+        chalk.yellow('Cannot resolve @file references: ') +
+          chalk.dim('No project focused. Use /focus <project> first.')
+      );
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // 1. Smart Query Routing via RoutingRAGEngine (preferred path)
   // ─────────────────────────────────────────────────────────────────────────
   if (state.routingEngine && state.allProjects.length > 0) {
@@ -1315,7 +1367,9 @@ async function handleQuestion(
   }
 
   // 2. Build messages for LLM
-  const systemPrompt = buildSystemPrompt(ragContext);
+  // Combine file reference context (explicit @file) with RAG context (search results)
+  const combinedContext = [fileReferenceContext, ragContext].filter(Boolean).join('\n\n');
+  const systemPrompt = buildSystemPrompt(combinedContext || undefined);
   const conversationMessages = state.conversationContext.getMessages();
 
   const messages: ChatMessage[] = [
@@ -1379,15 +1433,21 @@ function displayWelcome(state: ChatState, ctx: CommandContext): void {
 
 /**
  * Tab completion handler for REPL commands.
- * Currently supports project name completion for /focus.
+ *
+ * Supports:
+ * - /focus <TAB> → project names
+ * - /provider <TAB> → subcommands
+ * - /index <TAB> → directory paths
+ * - @<TAB> → file names from focused project
  *
  * @internal Exported for testing purposes
- * @param line - The current input line
  * @param getProjectNames - Function to retrieve project names (injected for testability)
+ * @param getCurrentProjectId - Function to get current project ID for @file completion
  * @returns Tuple of [completions, originalLine] as per Node.js readline spec
  */
 export function createCompleter(
-  getProjectNames: () => string[] = getAllProjectNames
+  getProjectNames: () => string[] = getAllProjectNames,
+  getCurrentProjectId: () => number | null = () => null
 ): (line: string) => [string[], string] {
   return (line: string): [string[], string] => {
     // Check for /focus or /f command with at least one space after
@@ -1414,6 +1474,44 @@ export function createCompleter(
       return [matches, line];
     }
 
+    // Check for /index command with at least one space after
+    const indexMatch = line.match(/^\/(index)\s+(.*)$/i);
+    if (indexMatch) {
+      const partial = indexMatch[2] ?? '';
+
+      // Don't complete if user is typing flags (-n, --force, etc.)
+      if (partial.startsWith('-')) {
+        return [[], line];
+      }
+
+      // Don't complete if partial is 'status' (subcommand)
+      if (partial.toLowerCase() === 'status' || partial.toLowerCase().startsWith('status')) {
+        return [['/index status'], line];
+      }
+
+      // Complete directory paths
+      const matches = completeDirectoryPath(partial);
+      return [matches.map((m) => `/index ${m}`), line];
+    }
+
+    // Check for @ file reference (anywhere in the line)
+    // Match @partial at the end of the line or before a space
+    const atMatch = line.match(/@([^\s@]*)$/);
+    if (atMatch) {
+      const projectId = getCurrentProjectId();
+      if (projectId !== null) {
+        const partial = atMatch[1] ?? '';
+        const fileNames = completeFileNames(projectId, partial);
+
+        // Replace the @partial with @filename in the completions
+        const linePrefix = line.slice(0, line.length - atMatch[0].length);
+        const matches = fileNames.map((name) => `${linePrefix}@${name}`);
+        return [matches, line];
+      }
+      // No project focused - can't complete files
+      return [[], line];
+    }
+
     // No completion for other input
     return [[], line];
   };
@@ -1431,7 +1529,11 @@ async function runChatREPL(
   ctx: CommandContext
 ): Promise<void> {
   return new Promise((resolve) => {
-    const completer = createCompleter();
+    // Create completer with state-aware project ID getter for @file completion
+    const completer = createCompleter(
+      getAllProjectNames,
+      () => (state.currentProject ? state.currentProject.id : null)
+    );
 
     const rl = readline.createInterface({
       input: process.stdin,
