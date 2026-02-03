@@ -286,9 +286,29 @@ export class DatabaseOperations {
    * - From the perspective of concurrent queries, data changes instantly
    * - No window where queries return 0 results
    *
+   * @throws Error if staging table doesn't exist or is empty for this project
    * @returns Counts of deleted and inserted chunks for logging
    */
   atomicSwapChunks(projectId: string): { deleted: number; inserted: number } {
+    // Validate staging table exists and has data before attempting swap
+    const stagingExists = this.db
+      .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_staging'`)
+      .get();
+
+    if (!stagingExists) {
+      throw new Error('Atomic swap failed: staging table does not exist');
+    }
+
+    const stagingCount = (
+      this.db
+        .prepare('SELECT COUNT(*) as count FROM chunks_staging WHERE project_id = ?')
+        .get(projectId) as { count: number }
+    ).count;
+
+    if (stagingCount === 0) {
+      throw new Error(`Atomic swap failed: no staged chunks found for project '${projectId}'`);
+    }
+
     return this.db.transaction(() => {
       // Delete old chunks for this project
       const deleteResult = this.db

@@ -367,8 +367,12 @@ export async function runIndexPipeline(
     if (useStaging) {
       try {
         db.dropChunksStagingTable();
-      } catch {
-        // Ignore cleanup errors
+      } catch (cleanupError) {
+        // Log cleanup failure but don't mask the original error
+        onWarning?.(
+          `Failed to cleanup staging table: ${(cleanupError as Error).message}`,
+          'staging-cleanup'
+        );
       }
     }
     // Fatal storage error
