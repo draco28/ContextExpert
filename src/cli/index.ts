@@ -27,6 +27,9 @@ import {
   getValidationOptionsForCommand,
 } from '../config/index.js';
 
+// Version injected at build time via tsup define
+const VERSION = process.env.CLI_VERSION ?? '0.0.0';
+
 // Create the root program
 const program = new Command();
 
@@ -34,7 +37,7 @@ const program = new Command();
 program
   .name('ctx')
   .description('Cross-project context agent - unified search and Q&A across codebases')
-  .version('0.1.0', '-v, --version', 'Display version number')
+  .version(VERSION, '-v, --version', 'Display version number')
 
   // Global options - available to ALL subcommands
   .option('--verbose', 'Enable verbose output for debugging', false)

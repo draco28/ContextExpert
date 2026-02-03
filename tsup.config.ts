@@ -1,4 +1,8 @@
 import { defineConfig } from 'tsup';
+import { readFileSync } from 'fs';
+
+// Read version from package.json for build-time injection
+const packageJson = JSON.parse(readFileSync('./package.json', 'utf-8'));
 
 export default defineConfig({
   // Entry points - what to build
@@ -39,4 +43,9 @@ export default defineConfig({
     // Dependencies (installed via npm, not bundled)
     'commander', 'chalk', 'ora', 'zod',
   ],
+
+  // Inject version at build time
+  define: {
+    'process.env.CLI_VERSION': JSON.stringify(packageJson.version),
+  },
 });
