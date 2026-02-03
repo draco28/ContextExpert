@@ -42,7 +42,7 @@
  * ```
  */
 
-import type { InMemoryVectorStore, SearchOptions } from '@contextaisdk/rag';
+import type { InMemoryVectorStore, SearchOptions, MetadataFilter } from '@contextaisdk/rag';
 import { reciprocalRankFusion, DEFAULT_RRF_K, type RankingList } from '@contextaisdk/rag';
 
 import { getDatabase, type DatabaseOperations } from '../database/operations.js';
@@ -383,8 +383,8 @@ export class MultiProjectVectorStoreManager {
   private buildFilter(
     fileType?: 'code' | 'docs' | 'config',
     language?: string
-  ): Record<string, unknown> | undefined {
-    const filter: Record<string, unknown> = {};
+  ): MetadataFilter | undefined {
+    const filter: MetadataFilter = {};
 
     if (fileType) filter.fileType = fileType;
     if (language) filter.language = language;

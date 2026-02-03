@@ -243,7 +243,6 @@ export function createSearchCommand(
         // ─────────────────────────────────────────────────────────────────
         const multiProjectService = getMultiProjectFusionService({
           rerank: shouldRerank,
-          rerankConfig: config.search.rerankConfig,
         });
 
         // Validate embedding model compatibility across all projects
