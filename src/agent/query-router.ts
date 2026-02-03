@@ -276,23 +276,25 @@ export class QueryIntentClassifier {
 
   /**
    * Determine intent from extracted features.
+   *
+   * Note: We require project mentions for MULTI_PROJECT classification to
+   * prevent false positives. A query like "compare error handling" without
+   * project mentions should be treated as GENERAL, not MULTI_PROJECT.
    */
   private determineIntent(features: IntentFeatures): { intent: QueryIntent; confidence: number } {
-    // Priority 1: Multi-project keywords present
-    if (features.hasMultiProjectKeywords) {
-      // Higher confidence if multiple projects explicitly mentioned
-      const confidence = features.mentionedProjects.length >= 2 ? 0.95 : 0.85;
-      return { intent: 'MULTI_PROJECT', confidence };
+    // Priority 1: Multiple projects explicitly mentioned
+    if (features.mentionedProjects.length >= 2) {
+      return { intent: 'MULTI_PROJECT', confidence: 0.95 };
     }
 
-    // Priority 2: Exactly one project mentioned
+    // Priority 2: Multi-project keywords WITH at least one project mentioned
+    if (features.hasMultiProjectKeywords && features.mentionedProjects.length > 0) {
+      return { intent: 'MULTI_PROJECT', confidence: 0.85 };
+    }
+
+    // Priority 3: Exactly one project mentioned
     if (features.mentionedProjects.length === 1) {
       return { intent: 'SINGLE_PROJECT', confidence: 0.9 };
-    }
-
-    // Priority 3: Multiple projects mentioned (without comparison keywords)
-    if (features.mentionedProjects.length > 1) {
-      return { intent: 'MULTI_PROJECT', confidence: 0.8 };
     }
 
     // Priority 4: Single-project indicators ("this project", etc.)
@@ -300,8 +302,14 @@ export class QueryIntentClassifier {
       return { intent: 'SINGLE_PROJECT', confidence: 0.85 };
     }
 
+    // Priority 5: Multi-project keywords WITHOUT project mentions → GENERAL
+    // (User likely wants general advice, not cross-project search)
+    if (features.hasMultiProjectKeywords) {
+      return { intent: 'GENERAL', confidence: 0.6 };
+    }
+
     // Default: GENERAL - needs LLM-based routing or fallback
-    return { intent: 'GENERAL', confidence: 0.7 };
+    return { intent: 'GENERAL', confidence: 0.5 };
   }
 
   /**
@@ -600,10 +608,8 @@ export class LLMProjectRouter {
    */
   private async callLLMWithTimeout(prompt: string): Promise<string> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let timeoutReject: ((reason: Error) => void) | undefined;
 
     const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutReject = reject;
       timeoutId = setTimeout(
         () => reject(new Error(`LLM routing timed out after ${this.llmTimeout}ms`)),
         this.llmTimeout

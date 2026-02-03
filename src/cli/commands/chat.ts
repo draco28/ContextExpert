@@ -37,6 +37,11 @@ import { loadConfig, type Config } from '../../config/loader.js';
 import { createRAGEngine, type ContextExpertRAGEngine } from '../../agent/rag-engine.js';
 import { RAGEngineError, RAGErrorCodes, type RAGSource } from '../../agent/types.js';
 import { formatCitations } from '../../agent/citations.js';
+import {
+  createProjectRouter,
+  type LLMProjectRouter,
+  type ProjectMetadata,
+} from '../../agent/query-router.js';
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import { validateProjectPath } from '../../utils/path-validation.js';
@@ -46,6 +51,10 @@ import {
   createEmbeddingProvider,
   type EmbeddingProvider,
 } from '../../indexer/index.js';
+import {
+  getMultiProjectFusionService,
+  type MultiProjectSearchResult,
+} from '../../search/index.js';
 import type { Project } from '../../database/schema.js';
 import { handleProviderCommand, createProviderFromConfig } from './provider-repl.js';
 import { getDefaultProvider } from '../../config/providers.js';
@@ -87,6 +96,14 @@ export interface ChatState {
   config: Config;
   /** Readline interface for prompt updates (set after REPL starts) */
   rl?: readline.Interface;
+  /** Query router for smart project selection (null if no projects) */
+  queryRouter: LLMProjectRouter | null;
+  /** All indexed projects (cached for routing) */
+  allProjects: ProjectMetadata[];
+  /** Embedding provider for multi-project search (lazy-loaded) */
+  embeddingProvider?: EmbeddingProvider;
+  /** Embedding dimensions (from config, for multi-project search) */
+  embeddingDimensions?: number;
 }
 
 /**
@@ -490,6 +507,33 @@ async function handleIndexCommand(
       state.ragEngine = newRagEngine;
       updatePrompt(state);
 
+      // Update router's project list with newly indexed project
+      if (state.queryRouter) {
+        const rawDb = getDb();
+        const allProjectsRaw = rawDb
+          .prepare('SELECT id, name, description, tags, file_count, chunk_count FROM projects')
+          .all() as Array<{
+            id: string;
+            name: string;
+            description: string | null;
+            tags: string | null;
+            file_count: number;
+            chunk_count: number;
+          }>;
+
+        state.allProjects = allProjectsRaw.map((p) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          tags: safeParseJsonArray(p.tags),
+          fileCount: p.file_count,
+          chunkCount: p.chunk_count,
+        }));
+
+        state.queryRouter.updateProjects(state.allProjects);
+        ctx.debug(`Updated router with ${state.allProjects.length} projects`);
+      }
+
       ctx.log(chalk.blue(`Now focused on: ${result.projectName}`));
       ctx.log(chalk.dim('Ask questions about your code, or use /unfocus to clear focus'));
     }
@@ -797,6 +841,67 @@ function safeParseJsonArray(json: string | null | undefined): string[] {
 }
 
 /**
+ * Get project name from ID using cached allProjects.
+ */
+function getProjectName(projectId: string, projects: ProjectMetadata[]): string {
+  return projects.find((p) => p.id === projectId)?.name ?? projectId;
+}
+
+/**
+ * Format multi-project search results as XML context for LLM.
+ * Groups results by project and includes attribution metadata.
+ */
+function formatMultiProjectContext(results: MultiProjectSearchResult[]): string {
+  return results
+    .map(
+      (r, i) =>
+        `<source id="${i + 1}" project="${r.projectName}" file="${r.filePath}" lines="${r.lineRange.start}-${r.lineRange.end}">\n${r.content}\n</source>`
+    )
+    .join('\n\n');
+}
+
+/**
+ * Convert MultiProjectSearchResult to RAGSource for citation display.
+ */
+function toRAGSources(results: MultiProjectSearchResult[]): RAGSource[] {
+  return results.map((r, i) => ({
+    index: i + 1,
+    filePath: `${r.projectName}/${r.filePath}`,
+    lineRange: r.lineRange,
+    content: r.content,
+    score: r.score,
+    language: r.language,
+    fileType: r.fileType,
+  }));
+}
+
+/**
+ * Get or create embedding provider for multi-project search.
+ * Lazily initializes on first use to avoid startup cost.
+ */
+async function getOrCreateEmbeddingProvider(
+  state: ChatState,
+  ctx: CommandContext
+): Promise<{ provider: EmbeddingProvider; dimensions: number }> {
+  // Return cached provider if available
+  if (state.embeddingProvider && state.embeddingDimensions) {
+    return { provider: state.embeddingProvider, dimensions: state.embeddingDimensions };
+  }
+
+  // Create new provider from config
+  ctx.debug('Initializing embedding provider for multi-project search...');
+  const { provider, dimensions } = await createEmbeddingProvider(state.config.embedding, {
+    onProgress: (p) => ctx.debug(`Embedding init: ${p.status}`),
+  });
+
+  // Cache for future use
+  state.embeddingProvider = provider;
+  state.embeddingDimensions = dimensions;
+
+  return { provider, dimensions };
+}
+
+/**
  * Find a project by name (case-insensitive).
  */
 function findProject(name: string): Project | undefined {
@@ -934,7 +1039,13 @@ async function streamResponse(
 }
 
 /**
- * Handle a user question: RAG search (if focused) + LLM generation.
+ * Handle a user question: Smart routing + RAG search + LLM generation.
+ *
+ * Query routing flow:
+ * 1. If router available: classify intent and route to appropriate project(s)
+ * 2. For single project: use ragEngine (existing or create new)
+ * 3. For multiple projects: use MultiProjectFusionService
+ * 4. Fallback: use focused project's ragEngine if available
  */
 async function handleQuestion(
   question: string,
@@ -944,8 +1055,134 @@ async function handleQuestion(
   let ragContext = '';
   let sources: RAGSource[] = [];
 
-  // 1. RAG search if focused on a project
-  if (state.ragEngine && state.currentProject) {
+  // ─────────────────────────────────────────────────────────────────────────
+  // 1. Smart Query Routing (if router available)
+  // ─────────────────────────────────────────────────────────────────────────
+  if (state.queryRouter && state.allProjects.length > 0) {
+    // Route the query to determine target project(s)
+    const routing = await state.queryRouter.route(
+      question,
+      state.allProjects,
+      state.currentProject?.id
+    );
+
+    ctx.debug(`Routing: ${routing.method} → ${routing.projectIds.length} project(s): ${routing.reason}`);
+
+    if (routing.projectIds.length > 0) {
+      // ───────────────────────────────────────────────────────────────────
+      // 1a. Single Project Search
+      // ───────────────────────────────────────────────────────────────────
+      if (routing.projectIds.length === 1) {
+        const targetProjectId = routing.projectIds[0]!;
+        const targetProjectName = getProjectName(targetProjectId, state.allProjects);
+
+        const spinner = ora({
+          text: `Searching ${targetProjectName}...`,
+          color: 'cyan',
+        }).start();
+
+        try {
+          // Determine if we need a new RAG engine
+          const needNewEngine = !state.ragEngine || state.currentProject?.id !== targetProjectId;
+
+          if (needNewEngine) {
+            ctx.debug(`Creating RAG engine for project: ${targetProjectName}`);
+
+            // Dispose old engine if switching projects
+            if (state.ragEngine && state.currentProject?.id !== targetProjectId) {
+              state.ragEngine.dispose();
+            }
+
+            // Create and STORE the new engine (prevents resource leak)
+            state.ragEngine = await createRAGEngine(state.config, targetProjectId);
+
+            // Update current project to match the engine (implicit focus)
+            const fullProject = getDb()
+              .prepare('SELECT * FROM projects WHERE id = ?')
+              .get(targetProjectId) as Project | undefined;
+            if (fullProject) {
+              state.currentProject = fullProject;
+              updatePrompt(state);
+            }
+          }
+
+          const ragResult = await state.ragEngine!.search(question, { finalK: 5 });
+          ragContext = ragResult.content;
+          sources = ragResult.sources;
+          const timeMs = ragResult.metadata?.retrievalMs ?? 0;
+          spinner.succeed(chalk.dim(`Found ${sources.length} sources in ${targetProjectName} (${timeMs}ms)`));
+        } catch (error) {
+          spinner.fail(chalk.dim('Search failed, continuing without context'));
+          ctx.debug(`RAG search failed: ${error}`);
+        }
+      }
+      // ───────────────────────────────────────────────────────────────────
+      // 1b. Multi-Project Search
+      // ───────────────────────────────────────────────────────────────────
+      else {
+        const projectNames = routing.projectIds
+          .map((id) => getProjectName(id, state.allProjects))
+          .join(', ');
+
+        const spinner = ora({
+          text: `Searching ${routing.projectIds.length} projects: ${projectNames}...`,
+          color: 'cyan',
+        }).start();
+
+        try {
+          // Get or create embedding provider
+          const { provider: embeddingProvider, dimensions } =
+            await getOrCreateEmbeddingProvider(state, ctx);
+
+          // Get multi-project fusion service
+          const fusionService = getMultiProjectFusionService({
+            rerank: state.config.search.rerank,
+          });
+
+          // Validate embedding compatibility across projects
+          const validation = fusionService.validateProjects(routing.projectIds);
+          if (!validation.valid) {
+            spinner.fail(chalk.dim('Projects use different embedding models'));
+            ctx.debug(`Embedding mismatch: ${JSON.stringify(validation)}`);
+            // Fall through to LLM without context
+          } else {
+            // Load project stores
+            await fusionService.loadProjects(
+              { projectIds: routing.projectIds, dimensions },
+              (progress) => ctx.debug(`${progress.projectName}: ${progress.phase}`)
+            );
+
+            // Generate query embedding
+            const queryEmbedding = await embeddingProvider.embed(question);
+
+            // Execute multi-project search
+            const results = await fusionService.search(question, queryEmbedding, {
+              topK: 10,
+            });
+
+            // Format results for LLM and citations
+            ragContext = formatMultiProjectContext(results);
+            sources = toRAGSources(results);
+
+            spinner.succeed(
+              chalk.dim(`Found ${sources.length} sources across ${routing.projectIds.length} projects`)
+            );
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : String(error);
+          spinner.fail(chalk.dim(`Multi-project search failed: ${errorMessage}`));
+          ctx.debug(`Multi-project search failed: ${error}`);
+          if (error instanceof Error && error.stack) {
+            ctx.debug(error.stack);
+          }
+        }
+      }
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // 2. Fallback: Original single-project behavior (no router or empty allProjects)
+  // ─────────────────────────────────────────────────────────────────────────
+  else if (state.ragEngine && state.currentProject) {
     const spinner = ora({
       text: `Searching ${state.currentProject.name}...`,
       color: 'cyan',
@@ -962,7 +1199,6 @@ async function handleQuestion(
     } catch (error) {
       spinner.fail(chalk.dim('Search failed, continuing without context'));
       ctx.debug(`RAG search failed: ${error}`);
-      // Continue without context
     }
   }
 
@@ -1301,7 +1537,41 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       });
 
       // ─────────────────────────────────────────────────────────────────────
-      // 5. Build state and start REPL
+      // 5. Initialize query router for smart project selection
+      // ─────────────────────────────────────────────────────────────────────
+      const db = getDb();
+      const allProjectsRaw = db
+        .prepare('SELECT id, name, description, tags, file_count, chunk_count FROM projects')
+        .all() as Array<{
+          id: string;
+          name: string;
+          description: string | null;
+          tags: string | null;
+          file_count: number;
+          chunk_count: number;
+        }>;
+
+      const allProjects: ProjectMetadata[] = allProjectsRaw.map((p) => ({
+        id: p.id,
+        name: p.name,
+        description: p.description,
+        tags: safeParseJsonArray(p.tags),
+        fileCount: p.file_count,
+        chunkCount: p.chunk_count,
+      }));
+
+      // Create router for query intent classification (heuristic-only)
+      // Note: Passing null disables LLM-based routing, uses heuristics instead
+      const queryRouter = allProjects.length > 0
+        ? createProjectRouter(null)
+        : null;
+
+      if (queryRouter) {
+        queryRouter.updateProjects(allProjects);
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
+      // 6. Build state and start REPL
       // ─────────────────────────────────────────────────────────────────────
       const state: ChatState = {
         currentProject,
@@ -1310,6 +1580,8 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         llmProvider: provider,
         providerInfo: { name: providerName, model },
         config,
+        queryRouter,
+        allProjects,
       };
 
       await runChatREPL(state, ctx);

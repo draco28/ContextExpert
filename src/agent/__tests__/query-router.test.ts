@@ -123,26 +123,29 @@ describe('QueryIntentClassifier', () => {
   describe('classify - MULTI_PROJECT intent', () => {
     const classifier = createIntentClassifier(['api-service', 'frontend-app', 'shared-utils']);
 
-    it('should detect "compare" keyword', () => {
+    it('should return GENERAL for "compare" keyword without project mentions', () => {
+      // Keywords alone don't trigger MULTI_PROJECT to prevent false positives
       const result = classifier.classify('Compare error handling patterns');
-      expect(result.intent).toBe('MULTI_PROJECT');
+      expect(result.intent).toBe('GENERAL');
       expect(result.features.hasMultiProjectKeywords).toBe(true);
       expect(result.features.multiProjectKeywords).toContain('compare');
     });
 
-    it('should detect "across" keyword', () => {
+    it('should return GENERAL for "across" keyword without project mentions', () => {
+      // Keywords alone don't trigger MULTI_PROJECT to prevent false positives
       const result = classifier.classify('How is logging done across the codebase?');
-      expect(result.intent).toBe('MULTI_PROJECT');
+      expect(result.intent).toBe('GENERAL');
       expect(result.features.multiProjectKeywords).toContain('across');
     });
 
-    it('should detect "all projects" keyword', () => {
+    it('should return GENERAL for "all projects" keyword without project mentions', () => {
+      // Keywords alone don't trigger MULTI_PROJECT to prevent false positives
       const result = classifier.classify('List all auth methods in all projects');
-      expect(result.intent).toBe('MULTI_PROJECT');
+      expect(result.intent).toBe('GENERAL');
       expect(result.features.multiProjectKeywords).toContain('all projects');
     });
 
-    it('should detect "vs" keyword', () => {
+    it('should detect "vs" keyword WITH project mentions', () => {
       const result = classifier.classify('api-service vs frontend-app error handling');
       expect(result.intent).toBe('MULTI_PROJECT');
       expect(result.features.multiProjectKeywords).toContain('vs');
@@ -158,6 +161,12 @@ describe('QueryIntentClassifier', () => {
       const result = classifier.classify('Compare api-service and frontend-app');
       expect(result.intent).toBe('MULTI_PROJECT');
       expect(result.confidence).toBeGreaterThanOrEqual(0.95);
+    });
+
+    it('should detect keyword WITH single project mention', () => {
+      const result = classifier.classify('Compare api-service with best practices');
+      expect(result.intent).toBe('MULTI_PROJECT');
+      expect(result.confidence).toBe(0.85);
     });
   });
 
@@ -255,15 +264,28 @@ describe('LLMProjectRouter', () => {
       expect(result.projectIds).toContain('proj-2');
     });
 
-    it('should route "compare" keyword to all projects', async () => {
+    it('should fallback for "compare" keyword without project mentions', async () => {
+      // Keywords alone don't trigger heuristic MULTI_PROJECT routing
+      // Instead, they fall through to GENERAL and use fallback
       const result = await router.route(
         'Compare error handling patterns',
         mockProjects,
         undefined
       );
 
+      expect(result.method).toBe('fallback_all');
+      expect(result.projectIds).toHaveLength(3); // All projects via fallback
+    });
+
+    it('should route "compare" keyword WITH project mention via heuristics', async () => {
+      const result = await router.route(
+        'Compare api-service error handling',
+        mockProjects,
+        undefined
+      );
+
       expect(result.method).toBe('heuristic');
-      expect(result.projectIds).toHaveLength(3); // All projects
+      expect(result.projectIds).toContain('proj-1');
     });
   });
 
@@ -494,10 +516,13 @@ describe('Integration: Classifier + Router', () => {
         expectedIntent: 'SINGLE_PROJECT',
       },
       {
+        // Keywords without specific project mentions → GENERAL (not MULTI_PROJECT)
+        // This prevents false positives; fallback still searches all projects
         query: 'Compare the error handling approaches across all projects',
-        expectedIntent: 'MULTI_PROJECT',
+        expectedIntent: 'GENERAL',
       },
       {
+        // Two specific projects mentioned → MULTI_PROJECT
         query: 'What is the difference between api-service and frontend-app auth?',
         expectedIntent: 'MULTI_PROJECT',
       },
