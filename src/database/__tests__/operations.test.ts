@@ -278,4 +278,322 @@ describe('DatabaseOperations', () => {
       expect(count).toBe(0);
     });
   });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Atomic Re-indexing: Staging Table Pattern Tests
+  //
+  // These tests verify the staging table operations used for zero-downtime
+  // re-indexing. The pattern:
+  // 1. Create staging table
+  // 2. Insert new chunks to staging (main table continues serving queries)
+  // 3. Atomically swap: DELETE old + INSERT from staging in one transaction
+  // 4. Drop staging table
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  describe('Staging Table Pattern (Atomic Re-indexing)', () => {
+    // SQL to create staging table (mirrors operations.ts)
+    const createStagingSql = `
+      CREATE TABLE chunks_staging (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        embedding BLOB NOT NULL,
+        file_path TEXT NOT NULL,
+        file_type TEXT,
+        language TEXT,
+        start_line INTEGER,
+        end_line INTEGER,
+        metadata TEXT,
+        created_at TEXT NOT NULL
+      )
+    `;
+
+    it('should create staging table with correct schema', () => {
+      // Drop if exists from previous test
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+
+      // Create staging table
+      testDb.exec(createStagingSql);
+
+      // Verify table exists
+      const tableInfo = testDb.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_staging'`
+      ).get() as { name: string } | undefined;
+
+      expect(tableInfo).toBeDefined();
+      expect(tableInfo?.name).toBe('chunks_staging');
+
+      // Verify columns match chunks table
+      const columns = testDb.prepare(`PRAGMA table_info(chunks_staging)`).all() as Array<{ name: string }>;
+      const columnNames = columns.map(c => c.name);
+
+      expect(columnNames).toContain('id');
+      expect(columnNames).toContain('project_id');
+      expect(columnNames).toContain('content');
+      expect(columnNames).toContain('embedding');
+      expect(columnNames).toContain('file_path');
+
+      // Cleanup
+      testDb.exec('DROP TABLE chunks_staging');
+    });
+
+    it('should insert chunks to staging table', () => {
+      const projectId = 'staging-test-1';
+      const now = new Date().toISOString();
+
+      // Create project
+      testDb.prepare(`
+        INSERT INTO projects (id, name, path, indexed_at, updated_at, file_count, chunk_count)
+        VALUES (?, 'Staging Test', '/staging/path', ?, ?, 0, 0)
+      `).run(projectId, now, now);
+
+      // Create staging table
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+      testDb.exec(createStagingSql);
+
+      // Insert to staging
+      const stmt = testDb.prepare(`
+        INSERT INTO chunks_staging (id, project_id, content, embedding, file_path, file_type, language, start_line, end_line, metadata, created_at)
+        VALUES (@id, @projectId, @content, @embedding, @filePath, @fileType, @language, @startLine, @endLine, @metadata, @createdAt)
+      `);
+
+      const testChunks: ChunkInsertInput[] = [
+        {
+          id: 'staging-chunk-1',
+          content: 'new function A',
+          embedding: new Float32Array([0.1, 0.2]),
+          filePath: 'src/a.ts',
+          fileType: 'code',
+          contentType: 'code',
+          language: 'typescript',
+          startLine: 1,
+          endLine: 5,
+          metadata: {},
+        },
+        {
+          id: 'staging-chunk-2',
+          content: 'new function B',
+          embedding: new Float32Array([0.3, 0.4]),
+          filePath: 'src/b.ts',
+          fileType: 'code',
+          contentType: 'code',
+          language: 'typescript',
+          startLine: 1,
+          endLine: 10,
+          metadata: {},
+        },
+      ];
+
+      const insertMany = testDb.transaction((chunks: ChunkInsertInput[]) => {
+        for (const chunk of chunks) {
+          stmt.run({
+            id: chunk.id,
+            projectId,
+            content: chunk.content,
+            embedding: embeddingToBlob(chunk.embedding),
+            filePath: chunk.filePath,
+            fileType: chunk.fileType,
+            language: chunk.language,
+            startLine: chunk.startLine,
+            endLine: chunk.endLine,
+            metadata: JSON.stringify(chunk.metadata),
+            createdAt: now,
+          });
+        }
+      });
+
+      insertMany(testChunks);
+
+      // Verify staging has chunks
+      const stagingCount = (testDb.prepare(
+        'SELECT COUNT(*) as count FROM chunks_staging WHERE project_id = ?'
+      ).get(projectId) as { count: number }).count;
+
+      expect(stagingCount).toBe(2);
+
+      // Verify main table is empty (no interference)
+      const mainCount = (testDb.prepare(
+        'SELECT COUNT(*) as count FROM chunks WHERE project_id = ?'
+      ).get(projectId) as { count: number }).count;
+
+      expect(mainCount).toBe(0);
+
+      // Cleanup
+      testDb.exec('DROP TABLE chunks_staging');
+    });
+
+    it('should atomically swap old chunks with staged chunks', () => {
+      const projectId = 'atomic-swap-test';
+      const now = new Date().toISOString();
+
+      // Create project
+      testDb.prepare(`
+        INSERT INTO projects (id, name, path, indexed_at, updated_at, file_count, chunk_count)
+        VALUES (?, 'Atomic Swap Test', '/atomic/path', ?, ?, 0, 0)
+      `).run(projectId, now, now);
+
+      // Insert OLD chunks to main table (simulating existing indexed data)
+      const oldChunkStmt = testDb.prepare(`
+        INSERT INTO chunks (id, project_id, content, embedding, file_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      const emptyEmbedding = embeddingToBlob(new Float32Array([0.1]));
+      oldChunkStmt.run('old-chunk-1', projectId, 'old content A', emptyEmbedding, 'old-a.ts', now);
+      oldChunkStmt.run('old-chunk-2', projectId, 'old content B', emptyEmbedding, 'old-b.ts', now);
+      oldChunkStmt.run('old-chunk-3', projectId, 'old content C', emptyEmbedding, 'old-c.ts', now);
+
+      // Verify old chunks exist
+      const oldCount = (testDb.prepare(
+        'SELECT COUNT(*) as count FROM chunks WHERE project_id = ?'
+      ).get(projectId) as { count: number }).count;
+      expect(oldCount).toBe(3);
+
+      // Create staging table with NEW chunks
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+      testDb.exec(createStagingSql);
+
+      const newChunkStmt = testDb.prepare(`
+        INSERT INTO chunks_staging (id, project_id, content, embedding, file_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      newChunkStmt.run('new-chunk-1', projectId, 'new content X', emptyEmbedding, 'new-x.ts', now);
+      newChunkStmt.run('new-chunk-2', projectId, 'new content Y', emptyEmbedding, 'new-y.ts', now);
+
+      // Perform ATOMIC SWAP in a transaction
+      const swapResult = testDb.transaction(() => {
+        const deleteResult = testDb.prepare(
+          'DELETE FROM chunks WHERE project_id = ?'
+        ).run(projectId);
+
+        const insertResult = testDb.prepare(
+          'INSERT INTO chunks SELECT * FROM chunks_staging WHERE project_id = ?'
+        ).run(projectId);
+
+        return {
+          deleted: deleteResult.changes,
+          inserted: insertResult.changes,
+        };
+      })();
+
+      // Verify swap results
+      expect(swapResult.deleted).toBe(3);
+      expect(swapResult.inserted).toBe(2);
+
+      // Verify main table now has NEW chunks only
+      const newCount = (testDb.prepare(
+        'SELECT COUNT(*) as count FROM chunks WHERE project_id = ?'
+      ).get(projectId) as { count: number }).count;
+      expect(newCount).toBe(2);
+
+      // Verify content is from new chunks
+      const chunks = testDb.prepare(
+        'SELECT id, content FROM chunks WHERE project_id = ? ORDER BY id'
+      ).all(projectId) as Array<{ id: string; content: string }>;
+
+      expect(chunks[0].id).toBe('new-chunk-1');
+      expect(chunks[0].content).toBe('new content X');
+      expect(chunks[1].id).toBe('new-chunk-2');
+      expect(chunks[1].content).toBe('new content Y');
+
+      // Cleanup
+      testDb.exec('DROP TABLE chunks_staging');
+    });
+
+    it('should maintain query availability during staging (old data serves queries)', () => {
+      const projectId = 'query-availability-test';
+      const now = new Date().toISOString();
+
+      // Create project with old chunks
+      testDb.prepare(`
+        INSERT INTO projects (id, name, path, indexed_at, updated_at, file_count, chunk_count)
+        VALUES (?, 'Query Test', '/query/path', ?, ?, 0, 0)
+      `).run(projectId, now, now);
+
+      const chunkStmt = testDb.prepare(`
+        INSERT INTO chunks (id, project_id, content, embedding, file_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      const emptyEmbedding = embeddingToBlob(new Float32Array([0.1]));
+      chunkStmt.run('existing-chunk', projectId, 'existing content', emptyEmbedding, 'existing.ts', now);
+
+      // Simulate re-indexing: create staging and add new chunks
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+      testDb.exec(createStagingSql);
+
+      const stagingStmt = testDb.prepare(`
+        INSERT INTO chunks_staging (id, project_id, content, embedding, file_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      stagingStmt.run('staged-chunk', projectId, 'staged content', emptyEmbedding, 'staged.ts', now);
+
+      // KEY TEST: While staging table has data, queries to main table should still work
+      // and return the OLD data (not 0 results!)
+      const mainTableQuery = testDb.prepare(
+        'SELECT content FROM chunks WHERE project_id = ?'
+      ).all(projectId) as Array<{ content: string }>;
+
+      expect(mainTableQuery.length).toBe(1);
+      expect(mainTableQuery[0].content).toBe('existing content');
+
+      // Staging table has different data
+      const stagingQuery = testDb.prepare(
+        'SELECT content FROM chunks_staging WHERE project_id = ?'
+      ).all(projectId) as Array<{ content: string }>;
+
+      expect(stagingQuery.length).toBe(1);
+      expect(stagingQuery[0].content).toBe('staged content');
+
+      // Cleanup
+      testDb.exec('DROP TABLE chunks_staging');
+    });
+
+    it('should drop staging table on cleanup', () => {
+      // Create staging table
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+      testDb.exec(createStagingSql);
+
+      // Verify it exists
+      let tableExists = testDb.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_staging'`
+      ).get();
+      expect(tableExists).toBeDefined();
+
+      // Drop it (cleanup)
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+
+      // Verify it's gone
+      tableExists = testDb.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='chunks_staging'`
+      ).get();
+      expect(tableExists).toBeUndefined();
+    });
+
+    it('should handle orphaned staging table from crashed session', () => {
+      // Simulate a crashed session: staging table exists with partial data
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+      testDb.exec(createStagingSql);
+
+      const orphanedStmt = testDb.prepare(`
+        INSERT INTO chunks_staging (id, project_id, content, embedding, file_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      const emptyEmbedding = embeddingToBlob(new Float32Array([0.1]));
+      orphanedStmt.run('orphaned-chunk', 'crashed-project', 'orphaned', emptyEmbedding, 'orphan.ts', new Date().toISOString());
+
+      // New session starts: should drop existing staging table and create fresh
+      // This is what createChunksStagingTable() does
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+      testDb.exec(createStagingSql);
+
+      // Verify orphaned data is gone
+      const count = (testDb.prepare(
+        'SELECT COUNT(*) as count FROM chunks_staging'
+      ).get() as { count: number }).count;
+
+      expect(count).toBe(0);
+
+      // Cleanup
+      testDb.exec('DROP TABLE IF EXISTS chunks_staging');
+    });
+  });
 });

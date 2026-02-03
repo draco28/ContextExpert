@@ -198,6 +198,125 @@ export class DatabaseOperations {
     return result.changes;
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Atomic Re-indexing: Staging Table Pattern
+  //
+  // These methods enable zero-downtime re-indexing by:
+  // 1. Writing new chunks to a staging table while queries use the main table
+  // 2. Atomically swapping data in a single transaction
+  // 3. Cleaning up the staging table after swap
+  //
+  // This eliminates the "query gap" where searches would return 0 results
+  // during the traditional delete-then-insert approach.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Create staging table for atomic re-indexing.
+   *
+   * The staging table mirrors the chunks table schema but without foreign keys
+   * or indexes - we only need it for temporary storage before the atomic swap.
+   *
+   * Called at the start of a re-indexing operation.
+   */
+  createChunksStagingTable(): void {
+    // Drop any orphaned staging table from a previous crashed session
+    this.db.exec('DROP TABLE IF EXISTS chunks_staging');
+
+    // Create fresh staging table with same column structure as chunks
+    // No foreign key constraints - we'll copy to the real table atomically
+    this.db.exec(`
+      CREATE TABLE chunks_staging (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        embedding BLOB NOT NULL,
+        file_path TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        language TEXT,
+        start_line INTEGER,
+        end_line INTEGER,
+        metadata TEXT,
+        created_at TEXT NOT NULL
+      )
+    `);
+  }
+
+  /**
+   * Insert chunks to the staging table (for atomic re-indexing).
+   *
+   * This is identical to insertChunks() but targets chunks_staging instead.
+   * Chunks are written here during re-indexing while the main table continues
+   * serving queries with the old data.
+   */
+  insertChunksToStaging(projectId: string, chunks: ChunkInsertInput[]): void {
+    const stmt = this.db.prepare(`
+      INSERT INTO chunks_staging (id, project_id, content, embedding, file_path, file_type, language, start_line, end_line, metadata, created_at)
+      VALUES (@id, @projectId, @content, @embedding, @filePath, @fileType, @language, @startLine, @endLine, @metadata, @createdAt)
+    `);
+
+    const now = new Date().toISOString();
+
+    // Use a transaction for batch insert performance
+    const insertMany = this.db.transaction((chunksToInsert: ChunkInsertInput[]) => {
+      for (const chunk of chunksToInsert) {
+        stmt.run({
+          id: chunk.id,
+          projectId,
+          content: chunk.content,
+          embedding: embeddingToBlob(chunk.embedding),
+          filePath: chunk.filePath,
+          fileType: chunk.fileType,
+          language: chunk.language,
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          metadata: JSON.stringify(chunk.metadata),
+          createdAt: now,
+        });
+      }
+    });
+
+    insertMany(chunks);
+  }
+
+  /**
+   * Atomically swap old chunks with staged chunks.
+   *
+   * This is the critical operation that makes re-indexing "atomic":
+   * - DELETE old chunks and INSERT new chunks in a single transaction
+   * - From the perspective of concurrent queries, data changes instantly
+   * - No window where queries return 0 results
+   *
+   * @returns Counts of deleted and inserted chunks for logging
+   */
+  atomicSwapChunks(projectId: string): { deleted: number; inserted: number } {
+    return this.db.transaction(() => {
+      // Delete old chunks for this project
+      const deleteResult = this.db
+        .prepare('DELETE FROM chunks WHERE project_id = ?')
+        .run(projectId);
+
+      // Insert all staged chunks into the main table
+      const insertResult = this.db
+        .prepare('INSERT INTO chunks SELECT * FROM chunks_staging WHERE project_id = ?')
+        .run(projectId);
+
+      return {
+        deleted: deleteResult.changes,
+        inserted: insertResult.changes,
+      };
+    })();
+  }
+
+  /**
+   * Drop the staging table after a successful swap.
+   *
+   * Also called at the start of createChunksStagingTable() to clean up
+   * any orphaned staging table from a crashed session.
+   */
+  dropChunksStagingTable(): void {
+    this.db.exec('DROP TABLE IF EXISTS chunks_staging');
+  }
+
   /**
    * Get a project by name.
    *

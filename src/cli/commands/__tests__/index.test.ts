@@ -328,7 +328,8 @@ describe('createIndexCommand', () => {
 
       await runCommand(['/path/to/project', '--force']);
 
-      expect(mockDb.deleteProjectChunks).toHaveBeenCalledWith('existing-uuid');
+      // With atomic re-indexing, we pass useStaging: true to the pipeline
+      // instead of calling deleteProjectChunks directly
       expect(indexer.runIndexPipeline).toHaveBeenCalled();
     });
 
@@ -344,15 +345,28 @@ describe('createIndexCommand', () => {
       );
     });
 
-    it('deletes existing chunks before re-indexing', async () => {
+    it('uses staging table pattern for atomic re-indexing', async () => {
       mockDb.getProjectByPath.mockReturnValue(existingProject);
 
       await runCommand(['/path/to/project', '--force']);
 
-      // Verify deleteProjectChunks was called BEFORE runIndexPipeline
-      const deleteCall = mockDb.deleteProjectChunks.mock.invocationCallOrder[0];
-      const pipelineCall = vi.mocked(indexer.runIndexPipeline).mock.invocationCallOrder[0];
-      expect(deleteCall).toBeLessThan(pipelineCall);
+      // Verify useStaging: true is passed to enable atomic re-indexing
+      // This replaces the old delete-then-insert pattern
+      expect(indexer.runIndexPipeline).toHaveBeenCalledWith(
+        expect.objectContaining({
+          useStaging: true,
+        })
+      );
+    });
+
+    it('does not use staging for fresh indexing', async () => {
+      mockDb.getProjectByPath.mockReturnValue(undefined); // No existing project
+
+      await runCommand(['/path/to/project']);
+
+      // Fresh indexing should NOT use staging table (useStaging is undefined/falsy)
+      const pipelineOptions = vi.mocked(indexer.runIndexPipeline).mock.calls[0][0];
+      expect(pipelineOptions.useStaging).toBeFalsy();
     });
   });
 
