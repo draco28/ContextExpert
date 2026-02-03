@@ -1378,9 +1378,18 @@ async function handleQuestion(
     { role: 'user', content: question },
   ];
 
-  // 3. Stream response
+  // 3. Stream response (with explicit error handling)
   ctx.log(''); // Blank line before response
-  const { content } = await streamResponse(state, messages, ctx);
+  let content: string;
+  try {
+    const result = await streamResponse(state, messages, ctx);
+    content = result.content;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    ctx.error(`Response failed: ${message}`);
+    ctx.debug(`Stream error details: ${error}`);
+    return; // Exit gracefully without updating conversation history
+  }
 
   // 4. Update conversation history
   state.conversationContext.addMessage({ role: 'user', content: question });

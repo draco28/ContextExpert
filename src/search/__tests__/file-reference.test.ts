@@ -84,12 +84,20 @@ describe('file-reference', () => {
       expect(refs).toEqual([]);
     });
 
-    it('handles @ in email addresses carefully', () => {
-      // This is a known limitation - emails might be parsed as references
-      // But typically questions don't contain emails
-      const refs = parseFileReferences('contact user@example.com');
-      // 'example.com' would be parsed as a reference - this is expected
-      expect(refs).toContain('example.com');
+    it('does not match email addresses', () => {
+      // Email addresses should NOT be parsed as file references
+      const refs = parseFileReferences('contact user@example.com for help');
+      expect(refs).toEqual([]);
+    });
+
+    it('matches @file in parenthetical expressions', () => {
+      const refs = parseFileReferences('see (@auth.ts) for details');
+      expect(refs).toEqual(['auth.ts']);
+    });
+
+    it('matches @file after punctuation', () => {
+      const refs = parseFileReferences('check this: @config.ts');
+      expect(refs).toEqual(['config.ts']);
     });
   });
 

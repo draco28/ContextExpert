@@ -70,9 +70,19 @@ export interface ResolveOptions {
 /**
  * Regex to match @file references in user input.
  * Matches @filename or @path/to/file patterns.
- * Does not match @ followed by whitespace or end of string.
+ *
+ * Design:
+ * - Negative lookbehind `(?<![a-zA-Z0-9])` avoids email addresses
+ * - Character class `[^\s@()\[\]{},;:!?'"]+` captures filename/path
+ * - Excludes trailing punctuation that's likely sentence structure
+ *
+ * Examples:
+ * - `user@example.com` → no match (@ preceded by alphanumeric)
+ * - `@auth.ts` → matches "auth.ts"
+ * - `(@file.ts)` → matches "file.ts" (excludes parens)
+ * - `@src/utils.ts, and more` → matches "src/utils.ts" (excludes comma)
  */
-const FILE_REFERENCE_REGEX = /@([^\s@]+)/g;
+const FILE_REFERENCE_REGEX = /(?<![a-zA-Z0-9])@([^\s@()\[\]{},;:!?'"]+)/g;
 
 /**
  * Default options for resolving references.

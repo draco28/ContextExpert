@@ -84,6 +84,8 @@ export async function handleShareCommand(
 
     if (result.copiedToClipboard) {
       ctx.log(chalk.dim('  Clipboard: ') + chalk.green('Path copied'));
+    } else {
+      ctx.log(chalk.dim('  Clipboard: ') + chalk.yellow('Not available'));
     }
 
     ctx.log('');
