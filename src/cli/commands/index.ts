@@ -97,10 +97,12 @@ export function createIndexCommand(
         );
       }
 
-      // If re-indexing, clear existing chunks
-      if (existingProject && cmdOptions.force) {
-        ctx.debug(`Re-indexing: clearing ${existingProject.chunk_count} existing chunks`);
-        db.deleteProjectChunks(existingProject.id);
+      // Determine if we need atomic re-indexing (staging table pattern)
+      // When re-indexing, we use a staging table to avoid the "query gap"
+      // where searches would return 0 results during indexing
+      const useStaging = existingProject && cmdOptions.force;
+      if (useStaging) {
+        ctx.debug(`Re-indexing: will use atomic swap (${existingProject.chunk_count} existing chunks)`);
       }
 
       // Ensure database is migrated
@@ -173,6 +175,7 @@ export function createIndexCommand(
           embeddingModel,
           embeddingDimensions,
           embeddingTimeout: config.embedding.timeout_ms,
+          useStaging, // Atomic re-indexing: use staging table pattern
           chunkerConfig: {
             embeddingProvider, // For SemanticChunker on docs
           },

@@ -25,6 +25,7 @@ import type { FileInfo } from './types.js';
 import type { ChunkResult, BatchChunkResult } from './chunker/types.js';
 import type { EmbeddedChunk } from './embedder/types.js';
 import { getDatabase } from '../database/index.js';
+import { getVectorStoreManager, getBM25StoreManager } from '../search/index.js';
 import type { IndexingStage, StageStats, IndexPipelineResult } from '../cli/utils/progress.js';
 
 /**
@@ -54,6 +55,19 @@ export interface IndexPipelineOptions {
 
   /** Timeout in milliseconds for embedding operations */
   embeddingTimeout?: number;
+
+  /**
+   * Use staging table pattern for atomic re-indexing.
+   *
+   * When true:
+   * - New chunks are written to a staging table during indexing
+   * - Old chunks continue serving queries until indexing completes
+   * - At the end, data is swapped atomically (DELETE old + INSERT new in one transaction)
+   *
+   * This eliminates the "query gap" during re-indexing where searches would return 0 results.
+   * Use this when re-indexing an existing project (--force flag).
+   */
+  useStaging?: boolean;
 
   // Progress callbacks
   onStageStart?: (stage: IndexingStage, total: number) => void;
@@ -281,6 +295,7 @@ export async function runIndexPipeline(
   onStageStart?.('storing', embeddedChunks.length);
 
   let chunksStored = 0;
+  const useStaging = options.useStaging ?? false;
 
   try {
     // Ensure project exists in database with embedding config
@@ -292,29 +307,54 @@ export async function runIndexPipeline(
       embeddingDimensions: options.embeddingDimensions,
     });
 
+    // If using staging table pattern for atomic re-indexing:
+    // - Create staging table before inserting
+    // - Old chunks in main table continue serving queries during indexing
+    if (useStaging) {
+      db.createChunksStagingTable();
+    }
+
     // Store chunks in batches
     const BATCH_SIZE = 100;
     for (let i = 0; i < embeddedChunks.length; i += BATCH_SIZE) {
       const batch = embeddedChunks.slice(i, i + BATCH_SIZE);
 
-      db.insertChunks(
-        projectId,
-        batch.map((chunk) => ({
-          id: chunk.id,
-          content: chunk.content,
-          embedding: chunk.embedding,
-          filePath: chunk.file_path,
-          fileType: chunk.file_type,
-          contentType: chunk.content_type,
-          language: chunk.language,
-          startLine: chunk.start_line,
-          endLine: chunk.end_line,
-          metadata: chunk.metadata,
-        }))
-      );
+      const chunkData = batch.map((chunk) => ({
+        id: chunk.id,
+        content: chunk.content,
+        embedding: chunk.embedding,
+        filePath: chunk.file_path,
+        fileType: chunk.file_type,
+        contentType: chunk.content_type,
+        language: chunk.language,
+        startLine: chunk.start_line,
+        endLine: chunk.end_line,
+        metadata: chunk.metadata,
+      }));
+
+      // Insert to staging table (re-indexing) or main table (fresh index)
+      if (useStaging) {
+        db.insertChunksToStaging(projectId, chunkData);
+      } else {
+        db.insertChunks(projectId, chunkData);
+      }
 
       chunksStored += batch.length;
       onProgress?.('storing', chunksStored, embeddedChunks.length);
+    }
+
+    // If using staging table: atomically swap old chunks with new chunks
+    // This is the critical operation that makes re-indexing "zero-downtime"
+    if (useStaging) {
+      const swapResult = db.atomicSwapChunks(projectId);
+      db.dropChunksStagingTable();
+
+      // Invalidate search caches so they rebuild with new data on next query
+      getVectorStoreManager().invalidate(projectId);
+      getBM25StoreManager().invalidate(projectId);
+
+      // Log swap details (only visible in verbose mode)
+      onWarning?.(`Atomic swap: deleted ${swapResult.deleted} old chunks, inserted ${swapResult.inserted} new chunks`, 'atomic-reindex');
     }
 
     // Update project statistics
@@ -323,6 +363,14 @@ export async function runIndexPipeline(
       chunkCount: chunksStored,
     });
   } catch (error) {
+    // Clean up staging table on error to avoid orphaned data
+    if (useStaging) {
+      try {
+        db.dropChunksStagingTable();
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
     // Fatal storage error
     throw error;
   }
