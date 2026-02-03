@@ -1142,9 +1142,24 @@ async function handleQuestion(
           // Validate embedding compatibility across projects
           const validation = fusionService.validateProjects(routing.projectIds);
           if (!validation.valid) {
-            spinner.fail(chalk.dim('Projects use different embedding models'));
-            ctx.debug(`Embedding mismatch: ${JSON.stringify(validation)}`);
-            // Fall through to LLM without context
+            // Build user-friendly error with project details
+            const mismatchedProjects =
+              validation.errors
+                ?.map((e) => `${e.projectName} (${e.embeddingModel ?? 'unknown'})`)
+                .join(', ') ?? 'unknown projects';
+
+            spinner.warn(
+              chalk.yellow('Embedding mismatch: ') +
+                'Cannot search across projects with different embedding models'
+            );
+            ctx.log(chalk.yellow('  Affected: ') + mismatchedProjects);
+            ctx.log(
+              chalk.dim('  Tip: Re-index with ') +
+                chalk.cyan('cx index <project>') +
+                chalk.dim(' to use the same model')
+            );
+            ctx.debug(`Full validation: ${JSON.stringify(validation)}`);
+            // ragContext and sources remain empty (initialized above)
           } else {
             // Load project stores
             await fusionService.loadProjects(

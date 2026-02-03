@@ -616,6 +616,10 @@ export class LLMProjectRouter {
       );
     });
 
+    // Suppress unhandled rejection if timeout fires after race settles.
+    // This doesn't prevent the rejection from affecting Promise.race().
+    timeoutPromise.catch(() => {});
+
     try {
       const result = await Promise.race([this.callLLM(prompt), timeoutPromise]);
       return result;
@@ -679,9 +683,14 @@ export class LLMProjectRouter {
     const validIds = new Set(projects.map((p) => p.id));
     const filteredProjectIds = validated.projectIds.filter((id) => validIds.has(id));
 
+    // Set confidence to 0 if all projects were invalid (LLM hallucinated IDs).
+    // This prevents misleading downstream code that checks confidence thresholds.
+    const adjustedConfidence = filteredProjectIds.length === 0 ? 0 : validated.confidence;
+
     return {
       ...validated,
       projectIds: filteredProjectIds,
+      confidence: adjustedConfidence,
     };
   }
 
