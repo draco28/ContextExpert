@@ -1,6 +1,6 @@
 {
   "name": "@contextexpert/cli",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Cross-project context agent CLI - unified search and Q&A across codebases",
   "type": "module",
   "bin": {
