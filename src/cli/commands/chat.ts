@@ -35,13 +35,22 @@ import {
 import { getDb, runMigrations, getDatabase } from '../../database/index.js';
 import { loadConfig, type Config } from '../../config/loader.js';
 import { createRAGEngine, type ContextExpertRAGEngine } from '../../agent/rag-engine.js';
-import { RAGEngineError, RAGErrorCodes, type RAGSource } from '../../agent/types.js';
+import {
+  RAGEngineError,
+  RAGErrorCodes,
+  type RAGSource,
+  type RoutingRAGResult,
+} from '../../agent/types.js';
 import { formatCitations } from '../../agent/citations.js';
 import {
   createProjectRouter,
   type LLMProjectRouter,
   type ProjectMetadata,
 } from '../../agent/query-router.js';
+import {
+  RoutingRAGEngine,
+  createRoutingRAGEngine,
+} from '../../agent/routing-rag-engine.js';
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import { validateProjectPath } from '../../utils/path-validation.js';
@@ -54,6 +63,7 @@ import {
 import {
   getMultiProjectFusionService,
   type MultiProjectSearchResult,
+  EmbeddingMismatchError,
 } from '../../search/index.js';
 import type { Project } from '../../database/schema.js';
 import { handleProviderCommand, createProviderFromConfig } from './provider-repl.js';
@@ -81,7 +91,11 @@ export interface ChatState {
   currentProject: Project | null;
   /** Conversation history with automatic truncation (from @contextaisdk/core) */
   conversationContext: ConversationContext;
-  /** RAG engine for current project (null if unfocused) */
+  /**
+   * RAG engine for current project (null if unfocused).
+   * @deprecated Use routingEngine instead. Kept for backward compatibility
+   * with /focus command and cases where routing is not available.
+   */
   ragEngine: ContextExpertRAGEngine | null;
   /** LLM provider (cached for session) */
   llmProvider: {
@@ -96,7 +110,10 @@ export interface ChatState {
   config: Config;
   /** Readline interface for prompt updates (set after REPL starts) */
   rl?: readline.Interface;
-  /** Query router for smart project selection (null if no projects) */
+  /**
+   * Query router for smart project selection (null if no projects).
+   * @deprecated Use routingEngine instead. Router is now internal to RoutingRAGEngine.
+   */
   queryRouter: LLMProjectRouter | null;
   /** All indexed projects (cached for routing) */
   allProjects: ProjectMetadata[];
@@ -104,6 +121,12 @@ export interface ChatState {
   embeddingProvider?: EmbeddingProvider;
   /** Embedding dimensions (from config, for multi-project search) */
   embeddingDimensions?: number;
+  /**
+   * Unified routing + RAG engine (new in ticket #88).
+   * Handles both single-project and multi-project search with automatic routing.
+   * When available, this is the preferred way to search.
+   */
+  routingEngine?: RoutingRAGEngine | null;
 }
 
 /**
@@ -135,7 +158,13 @@ interface REPLCommand {
  * - Conversation context
  */
 function cleanupChatState(state: ChatState): void {
-  // Dispose RAG engine (clears search store caches)
+  // Dispose routing engine (clears all cached single-project engines)
+  if (state.routingEngine) {
+    state.routingEngine.dispose();
+    state.routingEngine = null;
+  }
+
+  // Dispose legacy RAG engine (for backward compatibility)
   if (state.ragEngine) {
     state.ragEngine.dispose();
     state.ragEngine = null;
@@ -1056,9 +1085,81 @@ async function handleQuestion(
   let sources: RAGSource[] = [];
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 1. Smart Query Routing (if router available)
+  // 1. Smart Query Routing via RoutingRAGEngine (preferred path)
   // ─────────────────────────────────────────────────────────────────────────
-  if (state.queryRouter && state.allProjects.length > 0) {
+  if (state.routingEngine && state.allProjects.length > 0) {
+    const spinner = ora({
+      text: 'Searching...',
+      color: 'cyan',
+    }).start();
+
+    try {
+      // Delegate routing + search to RoutingRAGEngine
+      const result: RoutingRAGResult = await state.routingEngine.search(
+        question,
+        state.allProjects,
+        state.currentProject?.id,
+        { finalK: 5 }
+      );
+
+      ragContext = result.content;
+      sources = result.sources;
+
+      // Build spinner message based on routing result
+      const { routing } = result;
+      const projectCount = routing.projectIds.length;
+      const timeMs = result.metadata?.totalMs ?? 0;
+
+      if (projectCount === 0) {
+        spinner.info(chalk.dim('No projects matched query'));
+      } else if (projectCount === 1) {
+        const projectName = getProjectName(routing.projectIds[0]!, state.allProjects);
+        spinner.succeed(
+          chalk.dim(`Found ${sources.length} sources in ${projectName} (${timeMs.toFixed(0)}ms)`)
+        );
+      } else {
+        spinner.succeed(
+          chalk.dim(`Found ${sources.length} sources across ${projectCount} projects (${timeMs.toFixed(0)}ms)`)
+        );
+      }
+
+      // Debug logging for routing decision
+      ctx.debug(`Routing: ${routing.method} → ${projectCount} project(s): ${routing.reason}`);
+    } catch (error) {
+      // Handle embedding mismatch errors specially
+      if (error instanceof EmbeddingMismatchError) {
+        const validation = error.validation;
+        const mismatchedProjects =
+          validation.errors
+            ?.map((e) => `${e.projectName} (${e.embeddingModel ?? 'unknown'})`)
+            .join(', ') ?? 'unknown projects';
+
+        spinner.warn(
+          chalk.yellow('Embedding mismatch: ') +
+            'Cannot search across projects with different embedding models'
+        );
+        ctx.log(chalk.yellow('  Affected: ') + mismatchedProjects);
+        ctx.log(
+          chalk.dim('  Tip: Re-index with ') +
+            chalk.cyan('cx index <project>') +
+            chalk.dim(' to use the same model')
+        );
+      } else {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        spinner.fail(chalk.dim(`Search failed: ${errorMessage}`));
+        ctx.debug(`RoutingRAGEngine search failed: ${error}`);
+        if (error instanceof Error && error.stack) {
+          ctx.debug(error.stack);
+        }
+      }
+      // ragContext and sources remain empty
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // 1b. Legacy path: Direct queryRouter + manual engine management
+  // (Fallback when RoutingRAGEngine is not available)
+  // ─────────────────────────────────────────────────────────────────────────
+  else if (state.queryRouter && state.allProjects.length > 0) {
     // Route the query to determine target project(s)
     const routing = await state.queryRouter.route(
       question,
@@ -1066,12 +1167,10 @@ async function handleQuestion(
       state.currentProject?.id
     );
 
-    ctx.debug(`Routing: ${routing.method} → ${routing.projectIds.length} project(s): ${routing.reason}`);
+    ctx.debug(`Routing (legacy): ${routing.method} → ${routing.projectIds.length} project(s): ${routing.reason}`);
 
     if (routing.projectIds.length > 0) {
-      // ───────────────────────────────────────────────────────────────────
-      // 1a. Single Project Search
-      // ───────────────────────────────────────────────────────────────────
+      // Single Project Search (legacy)
       if (routing.projectIds.length === 1) {
         const targetProjectId = routing.projectIds[0]!;
         const targetProjectName = getProjectName(targetProjectId, state.allProjects);
@@ -1116,9 +1215,7 @@ async function handleQuestion(
           ctx.debug(`RAG search failed: ${error}`);
         }
       }
-      // ───────────────────────────────────────────────────────────────────
-      // 1b. Multi-Project Search
-      // ───────────────────────────────────────────────────────────────────
+      // Multi-Project Search (legacy)
       else {
         const projectNames = routing.projectIds
           .map((id) => getProjectName(id, state.allProjects))
@@ -1586,6 +1683,35 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       }
 
       // ─────────────────────────────────────────────────────────────────────
+      // 5b. Create RoutingRAGEngine (unified routing + search)
+      // ─────────────────────────────────────────────────────────────────────
+      let routingEngine: RoutingRAGEngine | null = null;
+
+      if (allProjects.length > 0) {
+        ctx.debug('Creating RoutingRAGEngine...');
+        try {
+          // Create embedding provider for multi-project search
+          const { provider: embeddingProvider, dimensions } = await createEmbeddingProvider(
+            config.embedding,
+            { onProgress: (p) => ctx.debug(`Embedding init: ${p.status}`) }
+          );
+
+          routingEngine = createRoutingRAGEngine({
+            config,
+            embeddingProvider,
+            dimensions,
+            forceRAG: true, // Always search when projects exist
+            llmProvider: null, // Heuristic-only routing for now
+          });
+
+          ctx.debug('RoutingRAGEngine created successfully');
+        } catch (error) {
+          ctx.debug(`Failed to create RoutingRAGEngine: ${error}`);
+          // Fall back to legacy ragEngine + queryRouter approach
+        }
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
       // 6. Build state and start REPL
       // ─────────────────────────────────────────────────────────────────────
       const state: ChatState = {
@@ -1597,6 +1723,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         config,
         queryRouter,
         allProjects,
+        routingEngine,
       };
 
       await runChatREPL(state, ctx);

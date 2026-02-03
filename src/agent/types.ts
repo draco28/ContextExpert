@@ -379,3 +379,120 @@ export class ConfigError extends RAGEngineError {
     this.name = 'ConfigError';
   }
 }
+
+// ============================================================================
+// ROUTING RAG ENGINE TYPES
+// ============================================================================
+
+/**
+ * Re-export routing types for convenience.
+ *
+ * These are the core types from query-router.ts that RoutingRAGEngine uses.
+ * Re-exporting here allows consumers to import everything from types.ts.
+ */
+export type {
+  ProjectMetadata,
+  RoutingResult,
+  LLMProjectRouterConfig,
+} from './query-router.js';
+
+/**
+ * Configuration for RoutingRAGEngine.
+ *
+ * The RoutingRAGEngine wraps ContextExpertRAGEngine with automatic
+ * query routing. It manages a pool of engines (one per project) and
+ * uses MultiProjectFusionService for cross-project searches.
+ */
+export interface RoutingRAGEngineConfig {
+  /**
+   * Application configuration.
+   *
+   * Used to create ContextExpertRAGEngine instances for each project.
+   * Must include embedding and search configuration.
+   */
+  config: import('../config/schema.js').Config;
+
+  /**
+   * Embedding provider for multi-project search.
+   *
+   * Used to embed queries before searching with MultiProjectFusionService.
+   * Must match the provider used during indexing.
+   */
+  embeddingProvider: import('@contextaisdk/rag').EmbeddingProvider;
+
+  /**
+   * Embedding dimensions.
+   *
+   * Must match the dimensions of the embedding model used during indexing.
+   * Common values: 768 (BGE-small), 1024 (BGE-base), 1536 (OpenAI ada-002)
+   */
+  dimensions: number;
+
+  /**
+   * Force RAG search even for GENERAL/ambiguous queries.
+   *
+   * When true (default), the engine ALWAYS attempts search when projects exist,
+   * regardless of how the query is classified. This ensures the LLM always
+   * has context available to use (or ignore) as appropriate.
+   *
+   * When false, low-confidence routing may skip search for GENERAL queries.
+   *
+   * Default: true (force RAG)
+   */
+  forceRAG?: boolean;
+
+  /**
+   * Optional LLM provider for intelligent routing.
+   *
+   * When provided, the router can use LLM to determine which project(s)
+   * to search for ambiguous queries. When null, only heuristic routing
+   * is used (keyword matching, project name detection).
+   *
+   * Default: null (heuristic-only routing)
+   */
+  llmProvider?: import('@contextaisdk/core').LLMProvider | null;
+
+  /**
+   * Configuration for the underlying router.
+   *
+   * Controls confidence thresholds, LLM timeout, retry behavior.
+   */
+  routerConfig?: import('./query-router.js').LLMProjectRouterConfig;
+}
+
+/**
+ * Routing metadata included in RoutingRAGResult.
+ *
+ * Provides visibility into how the query was routed, useful for
+ * debugging and logging.
+ */
+export interface RoutingMetadata {
+  /**
+   * Routing method used to determine target project(s).
+   *
+   * - 'heuristic': Project name detected in query (fast, no LLM)
+   * - 'llm': LLM determined best project(s) (slower, smarter)
+   * - 'fallback_all': Router uncertain, searched all projects
+   * - 'force-rag': forceRAG overrode low confidence, searched anyway
+   */
+  method: 'heuristic' | 'llm' | 'fallback_all' | 'force-rag';
+
+  /** Project IDs that were searched */
+  projectIds: string[];
+
+  /** Confidence in routing decision (0-1) */
+  confidence: number;
+
+  /** Human-readable explanation of routing decision */
+  reason: string;
+}
+
+/**
+ * Extended RAG result with routing metadata.
+ *
+ * Includes everything from RAGSearchResult plus routing information.
+ */
+export interface RoutingRAGResult extends RAGSearchResult {
+  /** Routing decision metadata */
+  routing: RoutingMetadata;
+}

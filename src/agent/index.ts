@@ -129,3 +129,18 @@ export type {
   RoutingResult,
   LLMProjectRouterConfig,
 } from './query-router.js';
+
+// ============================================================================
+// Routing RAG Engine (Unified Routing + Search)
+// ============================================================================
+
+export {
+  RoutingRAGEngine,
+  createRoutingRAGEngine,
+} from './routing-rag-engine.js';
+
+export type {
+  RoutingRAGEngineConfig,
+  RoutingRAGResult,
+  RoutingMetadata,
+} from './types.js';
