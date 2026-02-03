@@ -1265,10 +1265,10 @@ async function handleQuestion(
             );
 
             // Generate query embedding
-            const queryEmbedding = await embeddingProvider.embed(question);
+            const embeddingResult = await embeddingProvider.embed(question);
 
             // Execute multi-project search
-            const results = await fusionService.search(question, queryEmbedding, {
+            const results = await fusionService.search(question, embeddingResult.embedding, {
               topK: 10,
             });
 

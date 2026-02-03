@@ -55,7 +55,7 @@ const mockConfig = {
 
 const mockEmbeddingProvider: EmbeddingProvider = {
   name: 'mock-embedder',
-  embed: vi.fn().mockResolvedValue([0.1, 0.2, 0.3]),
+  embed: vi.fn().mockResolvedValue({ embedding: [0.1, 0.2, 0.3], tokenCount: 3, model: 'mock' }),
   embedBatch: vi.fn(),
   dimensions: 768,
 };
@@ -86,6 +86,13 @@ function createTestEngine(overrides?: Partial<RoutingRAGEngineConfig>): Instance
 describe('RoutingRAGEngine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+
+    // Reset embedding provider mock (cleared by vi.clearAllMocks)
+    (mockEmbeddingProvider.embed as ReturnType<typeof vi.fn>).mockResolvedValue({
+      embedding: [0.1, 0.2, 0.3],
+      tokenCount: 3,
+      model: 'mock',
+    });
 
     // Default mock implementations
     mockRoute.mockResolvedValue({

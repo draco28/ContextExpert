@@ -363,7 +363,7 @@ export interface RoutingResult {
   /** Project IDs to search */
   projectIds: string[];
   /** Routing method used */
-  method: 'heuristic' | 'llm' | 'fallback_all';
+  method: 'heuristic' | 'llm' | 'fallback_all' | 'force-rag';
   /** Confidence in routing decision */
   confidence: number;
   /** Human-readable explanation of routing decision */

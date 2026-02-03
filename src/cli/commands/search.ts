@@ -264,11 +264,11 @@ export function createSearchCommand(
 
         // Generate query embedding for dense search
         ctx.debug('Generating query embedding...');
-        const queryEmbedding = await embeddingProvider.embed(trimmedQuery);
+        const embeddingResult = await embeddingProvider.embed(trimmedQuery);
 
         // Execute cross-project hybrid search
         ctx.debug(`Executing multi-project hybrid search${shouldRerank ? ' with reranking' : ''}...`);
-        const multiResults = await multiProjectService.search(trimmedQuery, queryEmbedding, {
+        const multiResults = await multiProjectService.search(trimmedQuery, embeddingResult.embedding, {
           topK,
         });
 

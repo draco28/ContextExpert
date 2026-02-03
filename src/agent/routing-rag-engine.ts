@@ -58,7 +58,6 @@
  */
 
 import type { EmbeddingProvider } from '@contextaisdk/rag';
-import type { LLMProvider } from '@contextaisdk/core';
 
 import {
   createProjectRouter,
@@ -261,7 +260,7 @@ export class RoutingRAGEngine {
     }
 
     if (effectiveRouting.projectIds.length === 1) {
-      return this.searchSingleProject(query, effectiveRouting, options, startTime);
+      return this.searchSingleProject(query, effectiveRouting, options);
     }
 
     return this.searchMultipleProjects(query, effectiveRouting, options, startTime);
@@ -381,8 +380,7 @@ export class RoutingRAGEngine {
   private async searchSingleProject(
     query: string,
     routing: RoutingResult,
-    options: RAGEngineOptions | undefined,
-    startTime: number
+    options: RAGEngineOptions | undefined
   ): Promise<RoutingRAGResult> {
     const projectId = routing.projectIds[0]!;
 
@@ -419,11 +417,11 @@ export class RoutingRAGEngine {
     });
 
     // Generate query embedding
-    const queryEmbedding = await this.embeddingProvider.embed(query);
+    const embeddingResult = await this.embeddingProvider.embed(query);
 
     // Execute multi-project search
     const topK = options?.finalK ?? 10;
-    const results = await fusionService.search(query, queryEmbedding, { topK });
+    const results = await fusionService.search(query, embeddingResult.embedding, { topK });
 
     // Convert to RAGSearchResult format
     const ragResult = toRAGSearchResult(results, startTime);

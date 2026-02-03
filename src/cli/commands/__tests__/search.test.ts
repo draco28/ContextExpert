@@ -156,7 +156,7 @@ describe('createSearchCommand', () => {
     // Set up mock embedding provider (returns new EmbeddingProviderResult structure)
     vi.mocked(embedder.createEmbeddingProvider).mockResolvedValue({
       provider: {
-        embed: vi.fn().mockResolvedValue(new Array(1024).fill(0.1)), // Mock embedding vector
+        embed: vi.fn().mockResolvedValue({ embedding: new Array(1024).fill(0.1), tokenCount: 10, model: 'mock' }), // Mock EmbeddingResult
         embedBatch: vi.fn(),
         dimensions: 1024,
       },
