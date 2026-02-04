@@ -57,6 +57,15 @@ export interface IndexPipelineOptions {
   embeddingTimeout?: number;
 
   /**
+   * Batch size for embedding operations (default: 32).
+   *
+   * Smaller values create more event-loop yield points, improving
+   * UI responsiveness during background indexing at a small throughput cost.
+   * Recommended: 8 for background/TUI indexing, 32 for foreground CLI.
+   */
+  embeddingBatchSize?: number;
+
+  /**
    * Use staging table pattern for atomic re-indexing.
    *
    * When true:
@@ -312,7 +321,7 @@ export async function runIndexPipeline(
 
   try {
     embeddedChunks = await embedChunks(chunksCreated, embeddingProvider, {
-      batchSize: 32,
+      batchSize: options.embeddingBatchSize ?? 32,
       timeout: embeddingTimeout,
       signal, // Pass signal for cancellation support
       onProgress: (processed: number, total: number) => {

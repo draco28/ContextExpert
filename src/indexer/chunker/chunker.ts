@@ -270,6 +270,17 @@ export async function chunkFileWithResult(
 }
 
 /**
+ * Yield to the event loop between files.
+ * Keeps the REPL/TUI responsive during long chunking operations.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** Yield every N files to balance throughput with responsiveness. */
+const CHUNKING_YIELD_INTERVAL = 5;
+
+/**
  * Chunk multiple files with aggregated result reporting.
  *
  * Returns a BatchChunkResult with:
@@ -293,7 +304,8 @@ export async function chunkFilesWithResult(
   const allWarnings: string[] = [];
   const allErrors: string[] = [];
 
-  for (const file of files) {
+  for (let fi = 0; fi < files.length; fi++) {
+    const file = files[fi]!;
     const result = await chunkFileWithResult(file, config, options);
     fileResults.push(result);
 
@@ -309,6 +321,11 @@ export async function chunkFilesWithResult(
     // Prefix warnings with file path for context
     for (const warning of result.warnings) {
       allWarnings.push(`${result.filePath}: ${warning}`);
+    }
+
+    // Yield to event loop periodically to keep TUI/REPL responsive
+    if ((fi + 1) % CHUNKING_YIELD_INTERVAL === 0) {
+      await yieldToEventLoop();
     }
   }
 
