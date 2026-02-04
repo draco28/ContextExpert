@@ -18,12 +18,16 @@ import {
 import type { IndexPipelineOptions } from '../pipeline.js';
 import type { IndexPipelineResult, IndexingStage } from '../../cli/utils/progress.js';
 
-// Mock the pipeline module
-vi.mock('../pipeline.js', () => ({
-  runIndexPipeline: vi.fn(),
-}));
+// Mock the pipeline module, but preserve IndexingCancelledError
+vi.mock('../pipeline.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../pipeline.js')>();
+  return {
+    ...original,
+    runIndexPipeline: vi.fn(),
+  };
+});
 
-import { runIndexPipeline } from '../pipeline.js';
+import { runIndexPipeline, IndexingCancelledError } from '../pipeline.js';
 
 describe('IndexingSession', () => {
   let session: IndexingSession;

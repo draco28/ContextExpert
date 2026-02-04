@@ -67,7 +67,6 @@ export interface StatusBarOptions {
  */
 export class StatusBarRenderer {
   private currentStage: IndexingStage = 'scanning';
-  private currentTotal: number = 0;
   private currentProgress: ProgressData | null = null;
   private lastRenderTime: number = 0;
   private lastRenderedPercent: number = -1;
@@ -100,7 +99,6 @@ export class StatusBarRenderer {
    */
   setStage(stage: IndexingStage, total: number): void {
     this.currentStage = stage;
-    this.currentTotal = total;
     this.currentProgress = {
       stage,
       processed: 0,
@@ -120,7 +118,6 @@ export class StatusBarRenderer {
   update(data: ProgressData): void {
     this.currentProgress = data;
     this.currentStage = data.stage;
-    this.currentTotal = data.total;
 
     if (!this.active) return;
 

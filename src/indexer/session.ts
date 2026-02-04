@@ -12,7 +12,11 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { runIndexPipeline, type IndexPipelineOptions } from './pipeline.js';
+import {
+  runIndexPipeline,
+  IndexingCancelledError,
+  type IndexPipelineOptions,
+} from './pipeline.js';
 import type {
   IndexingStage,
   StageStats,
@@ -101,8 +105,6 @@ export class IndexingSession extends EventEmitter<IndexingSessionEvents> {
   private rateHistory: number[] = [];
   private lastProgressTime: number = 0;
   private lastProcessedCount: number = 0;
-  private currentStage: IndexingStage | null = null;
-  private stageStartTime: number = 0;
   private isFirstBatch: boolean = true;
 
   // EMA smoothing factor (0.3 = 30% weight to new value)
@@ -141,7 +143,6 @@ export class IndexingSession extends EventEmitter<IndexingSessionEvents> {
     this.rateHistory = [];
     this.lastProgressTime = 0;
     this.lastProcessedCount = 0;
-    this.currentStage = null;
     this.isFirstBatch = true;
 
     try {
@@ -177,7 +178,12 @@ export class IndexingSession extends EventEmitter<IndexingSessionEvents> {
       this.emit('complete', result);
       return result;
     } catch (error) {
-      if (this.status === 'cancelled') {
+      // Check if this was a cancellation (abort signal triggered)
+      if (
+        error instanceof IndexingCancelledError ||
+        this.abortController?.signal.aborted
+      ) {
+        this.status = 'cancelled';
         this.emit('cancelled');
         throw new Error('Indexing cancelled by user');
       }
@@ -205,8 +211,6 @@ export class IndexingSession extends EventEmitter<IndexingSessionEvents> {
    * Handle stage start event.
    */
   private handleStageStart(stage: IndexingStage, total: number): void {
-    this.currentStage = stage;
-    this.stageStartTime = performance.now();
     this.lastProgressTime = 0;
     this.lastProcessedCount = 0;
     this.rateHistory = [];
@@ -289,10 +293,10 @@ export class IndexingSession extends EventEmitter<IndexingSessionEvents> {
     // Calculate EMA from history
     if (this.rateHistory.length === 0) return 0;
 
-    let ema = this.rateHistory[0];
+    let ema = this.rateHistory[0]!; // Non-null: we checked length above
     for (let i = 1; i < this.rateHistory.length; i++) {
       ema =
-        IndexingSession.RATE_ALPHA * this.rateHistory[i] +
+        IndexingSession.RATE_ALPHA * this.rateHistory[i]! +
         (1 - IndexingSession.RATE_ALPHA) * ema;
     }
 

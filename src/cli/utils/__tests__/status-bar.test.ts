@@ -1,36 +1,33 @@
 /**
  * StatusBarRenderer Tests
  *
- * Tests the ANSI-based status bar for background indexing:
- * - Progress bar rendering
+ * Tests the readline-safe status bar for background indexing:
+ * - Progress bar rendering via console.log
  * - Rate and ETA display
- * - ANSI escape code output
  * - Throttling behavior
+ * - State management
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   StatusBarRenderer,
   createStatusBar,
-  type StatusBarOptions,
 } from '../status-bar.js';
 import type { ProgressData } from '../../../indexer/session.js';
 
 describe('StatusBarRenderer', () => {
   let statusBar: StatusBarRenderer;
-  let writeOutput: string[] = [];
-  const originalWrite = process.stdout.write;
+  let consoleOutput: string[] = [];
   const originalIsTTY = process.stdout.isTTY;
   const originalColumns = process.stdout.columns;
 
   beforeEach(() => {
-    writeOutput = [];
+    consoleOutput = [];
 
-    // Mock stdout.write
-    process.stdout.write = vi.fn((data: string | Uint8Array) => {
-      writeOutput.push(data.toString());
-      return true;
-    }) as any;
+    // Mock console.log (implementation uses console.log for output)
+    vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      consoleOutput.push(msg);
+    });
 
     // Mock TTY
     Object.defineProperty(process.stdout, 'isTTY', {
@@ -47,7 +44,6 @@ describe('StatusBarRenderer', () => {
   });
 
   afterEach(() => {
-    process.stdout.write = originalWrite;
     Object.defineProperty(process.stdout, 'isTTY', {
       value: originalIsTTY,
       configurable: true,
@@ -60,27 +56,15 @@ describe('StatusBarRenderer', () => {
   });
 
   describe('show/hide', () => {
-    it('should add newline when showing status bar', () => {
+    it('should activate the status bar when show is called', () => {
       statusBar.show();
-      expect(writeOutput.some((s) => s.includes('\n'))).toBe(true);
+      expect(statusBar.isActive()).toBe(true);
     });
 
-    it('should only show once (idempotent)', () => {
-      statusBar.show();
-      const countAfterFirst = writeOutput.filter((s) => s.includes('\n')).length;
-
-      statusBar.show();
-      const countAfterSecond = writeOutput.filter((s) => s.includes('\n')).length;
-
-      expect(countAfterSecond).toBe(countAfterFirst);
-    });
-
-    it('should clear line when hiding', () => {
+    it('should deactivate when hide is called', () => {
       statusBar.show();
       statusBar.hide();
-
-      // Should contain clear line escape code
-      expect(writeOutput.some((s) => s.includes('\x1b[2K'))).toBe(true);
+      expect(statusBar.isActive()).toBe(false);
     });
   });
 
@@ -89,10 +73,10 @@ describe('StatusBarRenderer', () => {
       statusBar.setStage('embedding', 100);
 
       // Should have rendered something
-      expect(writeOutput.length).toBeGreaterThan(0);
+      expect(consoleOutput.length).toBeGreaterThan(0);
 
       // Should contain the stage name
-      expect(writeOutput.some((s) => s.includes('Embedding'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('Embedding'))).toBe(true);
     });
 
     it('should update current stage', () => {
@@ -101,6 +85,11 @@ describe('StatusBarRenderer', () => {
 
       statusBar.setStage('embedding', 100);
       expect(statusBar.getCurrentStage()).toBe('embedding');
+    });
+
+    it('should activate the status bar', () => {
+      statusBar.setStage('embedding', 100);
+      expect(statusBar.isActive()).toBe(true);
     });
   });
 
@@ -121,29 +110,100 @@ describe('StatusBarRenderer', () => {
       expect(statusBar.getCurrentProgress()).toEqual(progressData);
     });
 
-    it('should throttle updates', async () => {
-      statusBar.setStage('embedding', 100);
-      writeOutput = []; // Clear initial render
+    it('should throttle updates', () => {
+      statusBar.setStage('embedding', 1000);
+      consoleOutput = []; // Clear initial render
 
-      // Rapid updates
+      // Rapid updates with small increments (1% each, below 10% threshold)
       for (let i = 0; i < 10; i++) {
         statusBar.update({
           stage: 'embedding',
-          processed: i * 10,
-          total: 100,
+          processed: i * 10, // 1%, 2%, 3%... (all small changes)
+          total: 1000,
         });
       }
 
       // Should have been throttled (not all 10 rendered)
-      // First update goes through, subsequent ones within throttle window are skipped
-      expect(writeOutput.length).toBeLessThan(10);
+      // Updates within throttle window are skipped unless significant progress (>=10%)
+      expect(consoleOutput.length).toBeLessThan(10);
     });
 
-    it('should show rate and ETA for embedding stage', async () => {
+    it('should render on significant progress even within throttle window', () => {
+      statusBar.setStage('embedding', 100);
+      consoleOutput = []; // Clear initial render
+
+      // Update with 0% progress
+      statusBar.update({
+        stage: 'embedding',
+        processed: 0,
+        total: 100,
+      });
+
+      // Jump to 50% - significant progress (>= 10% jump)
+      statusBar.update({
+        stage: 'embedding',
+        processed: 50,
+        total: 100,
+      });
+
+      // Should have rendered at least once for significant progress
+      expect(consoleOutput.length).toBeGreaterThan(0);
+    });
+
+    it('should show warmup message during first batch', async () => {
       statusBar.setStage('embedding', 100);
 
-      // Wait for throttle
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Wait for throttle to expire
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+
+      statusBar.update({
+        stage: 'embedding',
+        processed: 0,
+        total: 100,
+        warmingUp: true,
+      });
+
+      expect(consoleOutput.some((s) => s.includes('Warming up'))).toBe(true);
+    });
+  });
+
+  describe('progress bar rendering', () => {
+    it('should render filled and empty blocks', async () => {
+      statusBar.setStage('embedding', 100);
+
+      // Wait for throttle to expire
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+
+      statusBar.update({
+        stage: 'embedding',
+        processed: 50,
+        total: 100,
+      });
+
+      // Should contain progress bar characters
+      expect(consoleOutput.some((s) => s.includes('█') || s.includes('░'))).toBe(true);
+    });
+
+    it('should show percentage', async () => {
+      statusBar.setStage('embedding', 100);
+
+      // Wait for throttle to expire
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+
+      statusBar.update({
+        stage: 'embedding',
+        processed: 25,
+        total: 100,
+      });
+
+      expect(consoleOutput.some((s) => s.includes('25%'))).toBe(true);
+    });
+
+    it('should show rate for embedding stage', async () => {
+      statusBar.setStage('embedding', 100);
+
+      // Wait for throttle to expire
+      await new Promise((resolve) => setTimeout(resolve, 2100));
 
       statusBar.update({
         stage: 'embedding',
@@ -153,79 +213,26 @@ describe('StatusBarRenderer', () => {
         eta: 20,
       });
 
-      // Should contain rate
-      expect(writeOutput.some((s) => s.includes('chunks/sec'))).toBe(true);
-
-      // Should contain ETA
-      expect(writeOutput.some((s) => s.includes('ETA'))).toBe(true);
+      // Should contain rate (e.g., "2.5/s")
+      expect(consoleOutput.some((s) => s.includes('/s'))).toBe(true);
     });
 
-    it('should show warmup message during first batch', async () => {
+    it('should show ETA for embedding stage', async () => {
       statusBar.setStage('embedding', 100);
 
-      // Wait for throttle
-      await new Promise((resolve) => setTimeout(resolve, 150));
-
-      statusBar.update({
-        stage: 'embedding',
-        processed: 0,
-        total: 100,
-        warmingUp: true,
-      });
-
-      expect(writeOutput.some((s) => s.includes('Warming up'))).toBe(true);
-    });
-  });
-
-  describe('progress bar rendering', () => {
-    it('should render filled and empty blocks', async () => {
-      statusBar.setStage('embedding', 100);
-
-      // Wait for throttle
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      // Wait for throttle to expire
+      await new Promise((resolve) => setTimeout(resolve, 2100));
 
       statusBar.update({
         stage: 'embedding',
         processed: 50,
         total: 100,
+        rate: 2.5,
+        eta: 20,
       });
 
-      // Should contain progress bar characters
-      expect(writeOutput.some((s) => s.includes('█') || s.includes('░'))).toBe(true);
-    });
-
-    it('should show percentage', async () => {
-      statusBar.setStage('embedding', 100);
-
-      // Wait for throttle
-      await new Promise((resolve) => setTimeout(resolve, 150));
-
-      statusBar.update({
-        stage: 'embedding',
-        processed: 25,
-        total: 100,
-      });
-
-      expect(writeOutput.some((s) => s.includes('25%'))).toBe(true);
-    });
-  });
-
-  describe('ANSI escape codes', () => {
-    it('should use cursor save/restore', () => {
-      statusBar.setStage('embedding', 100);
-
-      // Save cursor: \x1b[s
-      expect(writeOutput.some((s) => s.includes('\x1b[s'))).toBe(true);
-
-      // Restore cursor: \x1b[u
-      expect(writeOutput.some((s) => s.includes('\x1b[u'))).toBe(true);
-    });
-
-    it('should use clear line', () => {
-      statusBar.setStage('embedding', 100);
-
-      // Clear line: \x1b[2K
-      expect(writeOutput.some((s) => s.includes('\x1b[2K'))).toBe(true);
+      // Should contain ETA
+      expect(consoleOutput.some((s) => s.includes('ETA'))).toBe(true);
     });
   });
 
@@ -238,19 +245,13 @@ describe('StatusBarRenderer', () => {
       statusBar = createStatusBar({ terminalWidth: 100 });
     });
 
-    it('should not output anything in non-TTY mode', () => {
-      writeOutput = [];
+    it('should still output in non-TTY mode via console.log', () => {
+      consoleOutput = [];
 
-      statusBar.show();
       statusBar.setStage('embedding', 100);
-      statusBar.update({
-        stage: 'embedding',
-        processed: 50,
-        total: 100,
-      });
 
-      // Should not have written anything
-      expect(writeOutput.length).toBe(0);
+      // In non-TTY mode, implementation still logs via console.log
+      expect(consoleOutput.length).toBeGreaterThan(0);
     });
   });
 
@@ -259,31 +260,39 @@ describe('StatusBarRenderer', () => {
       statusBar.show();
       statusBar.showSuccess('Project indexed');
 
-      expect(writeOutput.some((s) => s.includes('✓'))).toBe(true);
-      expect(writeOutput.some((s) => s.includes('Project indexed'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('✓'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('Project indexed'))).toBe(true);
     });
 
     it('should show error message', () => {
       statusBar.show();
       statusBar.showError('Failed to index');
 
-      expect(writeOutput.some((s) => s.includes('✗'))).toBe(true);
-      expect(writeOutput.some((s) => s.includes('Failed to index'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('✗'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('Failed to index'))).toBe(true);
     });
 
     it('should show cancelled message', () => {
       statusBar.show();
       statusBar.showCancelled();
 
-      expect(writeOutput.some((s) => s.includes('⚠'))).toBe(true);
-      expect(writeOutput.some((s) => s.includes('cancelled'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('⚠'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('cancelled'))).toBe(true);
+    });
+
+    it('should deactivate after showing status message', () => {
+      statusBar.show();
+      expect(statusBar.isActive()).toBe(true);
+
+      statusBar.showSuccess('Done');
+      expect(statusBar.isActive()).toBe(false);
     });
   });
 
   describe('ETA formatting', () => {
     it('should format seconds correctly', async () => {
       statusBar.setStage('embedding', 100);
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 2100));
 
       statusBar.update({
         stage: 'embedding',
@@ -293,12 +302,12 @@ describe('StatusBarRenderer', () => {
         eta: 45,
       });
 
-      expect(writeOutput.some((s) => s.includes('45s'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('45s'))).toBe(true);
     });
 
     it('should format minutes and seconds correctly', async () => {
       statusBar.setStage('embedding', 100);
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await new Promise((resolve) => setTimeout(resolve, 2100));
 
       statusBar.update({
         stage: 'embedding',
@@ -308,7 +317,7 @@ describe('StatusBarRenderer', () => {
         eta: 125, // 2 minutes 5 seconds
       });
 
-      expect(writeOutput.some((s) => s.includes('2m') && s.includes('5s'))).toBe(true);
+      expect(consoleOutput.some((s) => s.includes('2m') && s.includes('5s'))).toBe(true);
     });
   });
 

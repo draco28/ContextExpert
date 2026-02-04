@@ -54,14 +54,8 @@ import {
 import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import { validateProjectPath } from '../../utils/path-validation.js';
-import { createProgressReporter, type IndexPipelineResult } from '../utils/progress.js';
+import { getBackgroundIndexingCoordinator } from '../utils/background-indexing.js';
 import {
-  getBackgroundIndexingCoordinator,
-  type BackgroundIndexingStatus,
-} from '../utils/background-indexing.js';
-import { createStatusBar } from '../utils/status-bar.js';
-import {
-  runIndexPipeline,
   createEmbeddingProvider,
   type EmbeddingProvider,
 } from '../../indexer/index.js';

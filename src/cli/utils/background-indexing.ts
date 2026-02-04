@@ -18,7 +18,6 @@ import {
   IndexingSession,
   createIndexingSession,
   type ProgressData,
-  type IndexingSessionStatus,
 } from '../../indexer/session.js';
 import type { IndexPipelineOptions } from '../../indexer/pipeline.js';
 import type { IndexPipelineResult, IndexingStage } from './progress.js';
