@@ -50,11 +50,14 @@ export interface BackgroundIndexingOptions {
   /** Pipeline options (same as runIndexPipeline) */
   pipelineOptions: IndexPipelineOptions;
 
-  /** Status bar configuration options */
+  /** Status bar configuration options (omit to skip StatusBarRenderer, e.g. in TUI mode) */
   statusBarOptions?: StatusBarOptions;
 
   /** Readline interface to attach status bar to */
   readline?: import('node:readline').Interface;
+
+  /** Progress callback (for TUI integration) */
+  onProgress?: (data: { stage: string; processed: number; total: number; projectName: string }) => void;
 
   /** Callback when indexing completes successfully */
   onComplete?: (result: IndexPipelineResult) => void;
@@ -111,6 +114,7 @@ export class BackgroundIndexingCoordinator {
       pipelineOptions,
       statusBarOptions,
       readline,
+      onProgress,
       onComplete,
       onError,
       onCancelled,
@@ -123,16 +127,16 @@ export class BackgroundIndexingCoordinator {
       );
     }
 
-    // Create new session and status bar
+    // Create new session and status bar (skip StatusBarRenderer when no options, e.g. TUI mode)
     this.activeSession = createIndexingSession();
-    this.statusBar = createStatusBar(statusBarOptions);
+    this.statusBar = statusBarOptions ? createStatusBar(statusBarOptions) : null;
     this.currentProjectName = pipelineOptions.projectName;
     this.startedAt = Date.now();
     this.lastProgress = null;
     this.currentStage = null;
 
     // Attach status bar to readline if provided
-    if (readline) {
+    if (readline && this.statusBar) {
       this.statusBar.attach(readline);
     }
 
@@ -145,6 +149,12 @@ export class BackgroundIndexingCoordinator {
     this.activeSession.on('progress', (data) => {
       this.lastProgress = data;
       this.statusBar?.update(data);
+      onProgress?.({
+        stage: data.stage,
+        processed: data.processed,
+        total: data.total,
+        projectName: pipelineOptions.projectName,
+      });
     });
 
     this.activeSession.on('complete', (result) => {

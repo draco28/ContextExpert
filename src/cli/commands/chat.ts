@@ -78,6 +78,11 @@ import {
   type ResolvedReference,
 } from '../../search/file-reference.js';
 import { handleShareCommand } from './share-handler.js';
+import {
+  TUIController,
+  AgentPhase,
+  type StreamChunk as TUIStreamChunk,
+} from '../tui/index.js';
 
 // ============================================================================
 // Types
@@ -89,6 +94,8 @@ import { handleShareCommand } from './share-handler.js';
 interface ChatCommandOptions {
   /** Start focused on a specific project name */
   project?: string;
+  /** TUI mode is enabled by default on TTY; --no-tui disables it */
+  tui?: boolean;
 }
 
 /**
@@ -137,6 +144,8 @@ export interface ChatState {
    * When available, this is the preferred way to search.
    */
   routingEngine?: RoutingRAGEngine | null;
+  /** TUI controller when in TUI mode (null/undefined for classic REPL) */
+  tui?: TUIController;
 }
 
 /**
@@ -536,11 +545,13 @@ async function handleIndexCommand(
   // 5. Create embedding provider with progress display
   ctx.log('');
   let modelLoadingSpinner: ReturnType<typeof ora> | null = null;
-  if (process.stdout.isTTY) {
+  if (process.stdout.isTTY && !state.tui) {
     modelLoadingSpinner = ora({
       text: 'Loading embedding model...',
       prefixText: chalk.cyan('Setup'.padEnd(12)),
     }).start();
+  } else if (state.tui) {
+    ctx.log(chalk.dim('Loading embedding model...'));
   }
 
   let embeddingProvider: EmbeddingProvider;
@@ -558,11 +569,19 @@ async function handleIndexCommand(
     embeddingProvider = result.provider;
     embeddingModel = result.model;
     embeddingDimensions = result.dimensions;
-    modelLoadingSpinner?.succeed(
-      `Embedding model ready (${embeddingModel}, ${embeddingDimensions}d)`
-    );
+    if (modelLoadingSpinner) {
+      modelLoadingSpinner.succeed(
+        `Embedding model ready (${embeddingModel}, ${embeddingDimensions}d)`
+      );
+    } else {
+      ctx.log(chalk.green(`✓ Embedding model ready (${embeddingModel}, ${embeddingDimensions}d)`));
+    }
   } catch (error) {
-    modelLoadingSpinner?.fail('Failed to load embedding model');
+    if (modelLoadingSpinner) {
+      modelLoadingSpinner.fail('Failed to load embedding model');
+    } else {
+      ctx.log(chalk.red('✗ Failed to load embedding model'));
+    }
     ctx.error(`Embedding setup failed: ${(error as Error).message}`);
     ctx.log(chalk.dim('Check your embedding configuration: ctx config list'));
     return true;
@@ -581,14 +600,25 @@ async function handleIndexCommand(
       embeddingTimeout: state.config.embedding.timeout_ms,
       chunkerConfig: { embeddingProvider },
     },
-    statusBarOptions: {
+    // Skip StatusBarRenderer in TUI mode — progress routes via TUI status line
+    statusBarOptions: state.tui ? undefined : {
       terminalWidth: process.stdout.columns,
       noColor: !!process.env.NO_COLOR,
     },
-    readline: state.rl,
+    readline: state.tui ? undefined : state.rl,
+    // Route progress to TUI status line when in TUI mode
+    onProgress: state.tui ? (data) => {
+      state.tui!.setIndexingStatus({
+        projectName: data.projectName,
+        progress: data.total > 0 ? (data.processed / data.total) * 100 : 0,
+        stage: data.stage,
+      });
+    } : undefined,
 
     // Handle successful completion
     onComplete: async (result) => {
+      // Clear TUI indexing status
+      state.tui?.setIndexingStatus(undefined);
       ctx.log('');
       ctx.log(chalk.green(`✓ Indexed ${result.projectName}`));
       ctx.log(
@@ -658,6 +688,7 @@ async function handleIndexCommand(
 
     // Handle errors
     onError: (error) => {
+      state.tui?.setIndexingStatus(undefined);
       ctx.error(`Indexing failed: ${error.message}`);
       ctx.log(chalk.dim('Try running: ctx index <path> for detailed diagnostics'));
       state.rl?.prompt();
@@ -665,6 +696,7 @@ async function handleIndexCommand(
 
     // Handle cancellation
     onCancelled: () => {
+      state.tui?.setIndexingStatus(undefined);
       ctx.log(chalk.yellow('Indexing cancelled.'));
       state.rl?.prompt();
     },
@@ -1613,6 +1645,316 @@ export function createCompleter(
 }
 
 /**
+ * TUI-based chat REPL with fixed screen regions.
+ *
+ * Uses TUIController to manage:
+ * - Scrollable chat area (messages)
+ * - Fixed status bar (mode, context gauge, cost)
+ * - Fixed input area (readline with tab completion)
+ *
+ * Reuses all existing REPL command handlers and question logic.
+ */
+async function runChatTUI(
+  state: ChatState,
+  ctx: CommandContext
+): Promise<void> {
+  return new Promise((resolve) => {
+    // Create completer with state-aware project ID getter for @file completion
+    const completer = createCompleter(
+      getAllProjectNames,
+      () => (state.currentProject ? state.currentProject.id : null)
+    );
+
+    // Create TUI controller
+    // Note: omit contextWindowSize to use default 200k (actual model context window),
+    // not MAX_CONTEXT_TOKENS which is the conversation sliding window limit (8k).
+    const tui = new TUIController({
+      model: {
+        name: state.providerInfo.model,
+        provider: state.providerInfo.name,
+      },
+      project: state.currentProject?.name ?? null,
+      enableMarkdown: true,
+    });
+
+    // Store in state so command handlers can detect TUI mode
+    state.tui = tui;
+
+    // Create TUI-aware context that routes output through the scroll region.
+    // Without this, ctx.log() → console.log() bypasses ANSI scroll regions,
+    // causing REPL command output (/help, /projects, etc.) to be invisible.
+    const tuiCtx: CommandContext = {
+      ...ctx,
+      log: (message: string) => {
+        if (!ctx.options.json) {
+          tui.addInfoMessage(message);
+        }
+      },
+      warn: (message: string) => {
+        if (!ctx.options.json) {
+          tui.addInfoMessage(chalk.yellow(`Warning: ${message}`));
+        }
+      },
+      error: (message: string) => {
+        if (ctx.options.json) {
+          console.error(JSON.stringify({ error: message }));
+        } else {
+          tui.addInfoMessage(chalk.red(`Error: ${message}`));
+        }
+      },
+    };
+
+    // Track if we've already cleaned up to prevent double-cleanup
+    let cleanedUp = false;
+    const cleanup = () => {
+      if (!cleanedUp) {
+        cleanedUp = true;
+        cleanupChatState(state);
+        tui.shutdown();
+      }
+    };
+
+    // Handle user input
+    tui.onLine(async (line: string) => {
+      const input = line.trim();
+
+      // Skip empty input
+      if (!input) {
+        tui.prompt();
+        return;
+      }
+
+      // Check for REPL commands
+      const replCmd = parseREPLCommand(input);
+      if (replCmd) {
+        try {
+          const shouldContinue = await replCmd.command.handler(
+            replCmd.args,
+            state,
+            tuiCtx
+          );
+          if (!shouldContinue) {
+            cleanup();
+            resolve();
+            return;
+          }
+          // Update TUI project if it changed
+          tui.setProject(state.currentProject?.name ?? null);
+        } catch (error) {
+          tuiCtx.error(`Command failed: ${error}`);
+        }
+        tui.prompt();
+        return;
+      }
+
+      // Handle as question - show user message in chat area
+      tui.addUserMessage(input);
+
+      try {
+        // Set status to thinking
+        tui.setActivity(AgentPhase.THINKING, undefined, 'Searching...');
+
+        await handleQuestionTUI(input, state, tuiCtx, tui);
+      } catch (error) {
+        if (error instanceof CLIError) {
+          tuiCtx.error(error.message);
+          if (error.hint) {
+            tuiCtx.log(chalk.dim(error.hint));
+          }
+        } else {
+          tuiCtx.error(`Failed to process question: ${error}`);
+        }
+      }
+
+      // Return to idle and re-prompt
+      tui.setActivity(AgentPhase.IDLE);
+      tui.prompt();
+    });
+
+    // Handle Ctrl+C
+    tui.onSIGINT(() => {
+      const coordinator = getBackgroundIndexingCoordinator();
+
+      if (coordinator.isRunning()) {
+        coordinator.cancel();
+        tuiCtx.log(chalk.yellow('Indexing cancelled.'));
+        tui.prompt();
+        return;
+      }
+
+      tuiCtx.log(chalk.dim('Goodbye!'));
+      cleanup();
+      resolve();
+    });
+
+    // Handle close
+    tui.onClose(() => {
+      cleanup();
+      resolve();
+    });
+
+    // Start TUI with completer and prompt
+    tui.start(completer, getPrompt(state));
+  });
+}
+
+/**
+ * Handle a user question in TUI mode.
+ * Reuses the same logic as handleQuestion but routes output through TUI.
+ */
+async function handleQuestionTUI(
+  question: string,
+  state: ChatState,
+  ctx: CommandContext,
+  tui: TUIController
+): Promise<void> {
+  let ragContext = '';
+  let sources: RAGSource[] = [];
+
+  // Handle @file references
+  let fileReferenceContext = '';
+  let resolvedReferences: ResolvedReference[] = [];
+  const filePatterns = parseFileReferences(question);
+
+  if (filePatterns.length > 0) {
+    if (state.currentProject) {
+      resolvedReferences = resolveFileReferences(state.currentProject.id, filePatterns);
+      fileReferenceContext = formatReferencesAsContext(resolvedReferences);
+      const summary = getReferenceSummary(resolvedReferences);
+      const hasMatches = resolvedReferences.some((r) => r.matches.length > 0);
+
+      if (hasMatches) {
+        tui.addInfoMessage(chalk.cyan('Using: ') + chalk.dim(summary));
+      } else {
+        tui.addInfoMessage(chalk.yellow('No files found matching: ') + filePatterns.join(', '));
+      }
+
+      question = stripFileReferences(question);
+    } else {
+      tui.addInfoMessage(
+        chalk.yellow('Cannot resolve @file references: ') +
+          chalk.dim('No project focused. Use /focus <project> first.')
+      );
+    }
+  }
+
+  // Smart Query Routing via RoutingRAGEngine
+  if (state.routingEngine && state.allProjects.length > 0) {
+    tui.setActivity(AgentPhase.TOOL_USE, 'search', 'Searching across projects...');
+
+    try {
+      const result = await state.routingEngine.search(
+        question,
+        state.allProjects,
+        state.currentProject?.id,
+        { finalK: 5 }
+      );
+
+      ragContext = result.content;
+      sources = result.sources;
+
+      const { routing } = result;
+      const projectCount = routing.projectIds.length;
+      const timeMs = result.metadata?.totalMs ?? 0;
+
+      if (projectCount === 0) {
+        tui.addInfoMessage(chalk.dim('No projects matched query'));
+      } else if (projectCount === 1) {
+        const projectName = getProjectName(routing.projectIds[0]!, state.allProjects);
+        tui.addInfoMessage(
+          chalk.dim(`Found ${sources.length} sources in ${projectName} (${timeMs.toFixed(0)}ms)`)
+        );
+      } else {
+        tui.addInfoMessage(
+          chalk.dim(`Found ${sources.length} sources across ${projectCount} projects (${timeMs.toFixed(0)}ms)`)
+        );
+      }
+    } catch (error) {
+      if (error instanceof EmbeddingMismatchError) {
+        tui.addInfoMessage(chalk.yellow('Embedding mismatch: Cannot search across projects'));
+      } else {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        tui.addInfoMessage(chalk.dim(`Search failed: ${errorMessage}`));
+      }
+    }
+  } else if (state.ragEngine) {
+    // Direct search on focused project
+    tui.setActivity(AgentPhase.TOOL_USE, 'search', `Searching ${state.currentProject?.name ?? 'project'}...`);
+
+    try {
+      const ragResult = await state.ragEngine.search(question, { finalK: 5 });
+      ragContext = ragResult.content;
+      sources = ragResult.sources;
+    } catch (error) {
+      ctx.debug(`RAG search failed: ${error}`);
+    }
+  }
+
+  // Build messages with context (matching handleQuestion pattern from chat.ts)
+  const combinedContext = [fileReferenceContext, ragContext].filter(Boolean).join('\n\n');
+  const systemPrompt = buildSystemPrompt(combinedContext || undefined);
+  const conversationMessages = state.conversationContext.getMessages();
+
+  const messages: ChatMessage[] = [
+    { role: 'system', content: systemPrompt },
+    ...conversationMessages,
+    { role: 'user', content: question },
+  ];
+
+  // Stream the LLM response through the TUI
+  tui.setActivity(AgentPhase.STREAMING, undefined, 'Responding...');
+
+  const stream = state.llmProvider.streamChat(messages, {
+    maxTokens: 2048,
+    temperature: 0.3,
+  });
+
+  // Adapt the stream to TUI StreamChunk format
+  const tuiStream = adaptStreamForTUI(stream);
+  const responseContent = await tui.streamResponse(tuiStream);
+
+  // Show citations if we have sources
+  if (sources.length > 0) {
+    const citationsText = formatCitations(sources);
+    tui.addInfoMessage(citationsText);
+  }
+
+  // Update conversation history
+  state.conversationContext.addMessage({ role: 'user', content: question });
+  state.conversationContext.addMessage({ role: 'assistant', content: responseContent });
+
+  // Truncate if needed (automatic sliding window from SDK)
+  const removed = await state.conversationContext.truncate();
+  if (removed > 0) {
+    ctx.debug(`Truncated ${removed} old messages to stay within token limit`);
+  }
+}
+
+/**
+ * Adapt the existing StreamChunk generator to TUI StreamChunk format.
+ */
+async function* adaptStreamForTUI(
+  stream: AsyncGenerator<StreamChunk>
+): AsyncGenerator<TUIStreamChunk> {
+  for await (const chunk of stream) {
+    if (chunk.type === 'thinking' && chunk.content) {
+      yield { type: 'thinking', content: chunk.content };
+    } else if (chunk.type === 'text' && chunk.content) {
+      yield { type: 'text', content: chunk.content };
+    } else if (chunk.type === 'usage' && chunk.usage) {
+      yield {
+        type: 'usage',
+        usage: {
+          inputTokens: chunk.usage.promptTokens,
+          outputTokens: chunk.usage.completionTokens,
+          totalTokens: chunk.usage.totalTokens,
+        },
+      };
+    }
+  }
+}
+
+/**
  * Main REPL loop using readline.
  *
  * Uses event-based pattern (rl.on('line', ...)) instead of async iterator
@@ -1753,6 +2095,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
   return new Command('chat')
     .description('Interactive multi-turn chat with RAG-powered Q&A')
     .option('-p, --project <name>', 'Start focused on a specific project')
+    .option('--no-tui', 'Disable TUI mode (use classic readline REPL)')
     .action(async (cmdOptions: ChatCommandOptions) => {
       const ctx = getContext();
 
@@ -1937,6 +2280,19 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         routingEngine,
       };
 
-      await runChatREPL(state, ctx);
+      // TUI is default on TTY; --no-tui falls back to classic readline REPL
+      const useTUI = cmdOptions.tui !== false && process.stdout.isTTY;
+
+      if (useTUI) {
+        ctx.debug('Starting TUI mode...');
+        await runChatTUI(state, ctx);
+      } else {
+        if (cmdOptions.tui === false) {
+          ctx.debug('TUI disabled via --no-tui flag');
+        } else {
+          ctx.debug('TUI not available (not a TTY), using classic REPL');
+        }
+        await runChatREPL(state, ctx);
+      }
     });
 }
