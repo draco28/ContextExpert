@@ -279,9 +279,12 @@ function getFallbackModel(
   toProvider: ProviderType
 ): string {
   // Check config for explicit mapping first
-  const configModel = config.llm?.fallback_models?.[toProvider];
-  if (configModel) {
-    return configModel;
+  // fallback_models only supports core providers (not openai-compatible)
+  if (toProvider !== 'openai-compatible') {
+    const configModel = config.llm?.fallback_models?.[toProvider];
+    if (configModel) {
+      return configModel;
+    }
   }
   // Use default model for the target provider
   return getModelEquivalent(fromProvider, toProvider);
