@@ -89,6 +89,13 @@ export interface EmbedderOptions {
    * @param chunkId - ID of the chunk that failed
    */
   onError?: (error: Error, chunkId: string) => void;
+
+  /**
+   * AbortSignal for cancellation support.
+   * When aborted, embedding will stop at the next batch boundary.
+   * Already-computed embeddings are returned; in-flight batches are abandoned.
+   */
+  signal?: AbortSignal;
 }
 
 /**

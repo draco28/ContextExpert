@@ -107,6 +107,7 @@ export async function embedChunks(
   const {
     batchSize = DEFAULT_BATCH_SIZE,
     timeout,
+    signal,
     onProgress,
     onError,
   } = options;
@@ -121,6 +122,12 @@ export async function embedChunks(
 
   // Process in batches
   for (let i = 0; i < chunks.length; i += batchSize) {
+    // Check for cancellation before each batch
+    if (signal?.aborted) {
+      // Return what we have so far (partial results)
+      break;
+    }
+
     const batch = chunks.slice(i, i + batchSize);
     const texts = batch.map((chunk) => chunk.content);
 
@@ -151,9 +158,17 @@ export async function embedChunks(
 
       processed += batch.length;
       onProgress?.(processed, chunks.length);
+
+      // Yield to event loop to keep REPL responsive
+      await new Promise((resolve) => setImmediate(resolve));
     } catch (error) {
       // Batch failed - try individual chunks for better error isolation
       for (const chunk of batch) {
+        // Check for cancellation during fallback processing
+        if (signal?.aborted) {
+          break;
+        }
+
         try {
           const [embedding] = await embedBatch(provider, [chunk.content], timeout);
 

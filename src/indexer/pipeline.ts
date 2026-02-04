@@ -69,12 +69,62 @@ export interface IndexPipelineOptions {
    */
   useStaging?: boolean;
 
+  /**
+   * AbortSignal for cancellation support.
+   *
+   * When aborted, the pipeline will stop at the next safe checkpoint
+   * (between stages or between batches). Partial data is cleaned up.
+   *
+   * @example
+   * ```typescript
+   * const controller = new AbortController();
+   * runIndexPipeline({ ...options, signal: controller.signal });
+   *
+   * // Later, to cancel:
+   * controller.abort();
+   * ```
+   */
+  signal?: AbortSignal;
+
   // Progress callbacks
   onStageStart?: (stage: IndexingStage, total: number) => void;
   onProgress?: (stage: IndexingStage, processed: number, total: number, currentFile?: string) => void;
   onStageComplete?: (stage: IndexingStage, stats: StageStats) => void;
   onWarning?: (message: string, context?: string) => void;
   onError?: (error: Error, context?: string) => void;
+}
+
+/**
+ * Error thrown when indexing is cancelled via AbortSignal.
+ */
+export class IndexingCancelledError extends Error {
+  constructor() {
+    super('Indexing cancelled');
+    this.name = 'IndexingCancelledError';
+  }
+}
+
+/**
+ * Check if the abort signal has been triggered.
+ * Throws IndexingCancelledError if cancelled.
+ *
+ * @param signal - AbortSignal to check
+ * @throws IndexingCancelledError if signal is aborted
+ */
+function checkCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new IndexingCancelledError();
+  }
+}
+
+/**
+ * Yield to the event loop to allow other async operations to run.
+ * This is what makes the REPL responsive during long indexing operations.
+ *
+ * Uses setImmediate for optimal scheduling in Node.js event loop.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 /**
@@ -114,6 +164,7 @@ export async function runIndexPipeline(
     embeddingProvider,
     chunkerConfig,
     embeddingTimeout,
+    signal,
     onStageStart,
     onProgress,
     onStageComplete,
@@ -136,6 +187,7 @@ export async function runIndexPipeline(
   // =========================================================================
   // STAGE 1: SCANNING
   // =========================================================================
+  checkCancelled(signal);
   const scanStartTime = performance.now();
   onStageStart?.('scanning', 0); // Unknown total at start
 
@@ -177,6 +229,7 @@ export async function runIndexPipeline(
   // =========================================================================
   // STAGE 2: CHUNKING
   // =========================================================================
+  checkCancelled(signal);
   const chunkStartTime = performance.now();
   onStageStart?.('chunking', scanResult.files.length);
 
@@ -251,6 +304,7 @@ export async function runIndexPipeline(
   // =========================================================================
   // STAGE 3: EMBEDDING
   // =========================================================================
+  checkCancelled(signal);
   const embedStartTime = performance.now();
   onStageStart?.('embedding', chunksCreated.length);
 
@@ -260,6 +314,7 @@ export async function runIndexPipeline(
     embeddedChunks = await embedChunks(chunksCreated, embeddingProvider, {
       batchSize: 32,
       timeout: embeddingTimeout,
+      signal, // Pass signal for cancellation support
       onProgress: (processed: number, total: number) => {
         onProgress?.('embedding', processed, total);
       },
@@ -269,7 +324,7 @@ export async function runIndexPipeline(
       },
     });
   } catch (error) {
-    // Fatal embedding error
+    // Fatal embedding error (or cancellation)
     throw error;
   }
 
@@ -291,6 +346,7 @@ export async function runIndexPipeline(
   // =========================================================================
   // STAGE 4: STORING
   // =========================================================================
+  checkCancelled(signal);
   const storeStartTime = performance.now();
   onStageStart?.('storing', embeddedChunks.length);
 
@@ -341,6 +397,11 @@ export async function runIndexPipeline(
 
       chunksStored += batch.length;
       onProgress?.('storing', chunksStored, embeddedChunks.length);
+
+      // Check cancellation and yield to event loop between batches
+      // This keeps the REPL responsive during long storage operations
+      checkCancelled(signal);
+      await yieldToEventLoop();
     }
 
     // If using staging table: atomically swap old chunks with new chunks

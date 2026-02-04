@@ -108,5 +108,15 @@ export {
 // Pipeline orchestration
 export {
   runIndexPipeline,
+  IndexingCancelledError,
   type IndexPipelineOptions,
 } from './pipeline.js';
+
+// Session for background indexing
+export {
+  IndexingSession,
+  createIndexingSession,
+  type ProgressData,
+  type IndexingSessionStatus,
+  type IndexingSessionEvents,
+} from './session.js';

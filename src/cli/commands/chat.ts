@@ -56,6 +56,11 @@ import { CLIError } from '../../errors/index.js';
 import { validateProjectPath } from '../../utils/path-validation.js';
 import { createProgressReporter, type IndexPipelineResult } from '../utils/progress.js';
 import {
+  getBackgroundIndexingCoordinator,
+  type BackgroundIndexingStatus,
+} from '../utils/background-indexing.js';
+import { createStatusBar } from '../utils/status-bar.js';
+import {
   runIndexPipeline,
   createEmbeddingProvider,
   type EmbeddingProvider,
@@ -358,17 +363,67 @@ async function handleIndexStatusCommand(
   runMigrations();
   const db = getDb();
 
+  // Check if background indexing is running
+  const coordinator = getBackgroundIndexingCoordinator();
+  const bgStatus = coordinator.getStatus();
+
+  ctx.log('');
+  ctx.log(chalk.bold('Index Status'));
+  ctx.log(chalk.dim('─'.repeat(35)));
+
+  if (bgStatus.running) {
+    // Show live progress for background indexing
+    ctx.log(`${chalk.cyan('State:')}          ${chalk.yellow('indexing')}`);
+    ctx.log('');
+    ctx.log(chalk.bold('Currently Indexing:'));
+    ctx.log(`  ${chalk.cyan('Project:')}     ${bgStatus.projectName}`);
+
+    if (bgStatus.stage) {
+      const stageLabels: Record<string, string> = {
+        scanning: 'Scanning files',
+        chunking: 'Chunking files',
+        embedding: 'Computing embeddings',
+        storing: 'Storing chunks',
+      };
+      ctx.log(`  ${chalk.cyan('Stage:')}       ${stageLabels[bgStatus.stage] ?? bgStatus.stage}`);
+    }
+
+    if (bgStatus.progress) {
+      const { processed, total, rate, eta } = bgStatus.progress;
+      const percent = total > 0 ? Math.round((processed / total) * 100) : 0;
+      ctx.log(`  ${chalk.cyan('Progress:')}    ${processed.toLocaleString()}/${total.toLocaleString()} (${percent}%)`);
+
+      if (rate !== undefined && rate > 0) {
+        ctx.log(`  ${chalk.cyan('Rate:')}        ${rate.toFixed(1)} chunks/sec`);
+      }
+
+      if (eta !== undefined && eta > 0) {
+        const etaStr = eta < 60 ? `${eta}s` : `${Math.floor(eta / 60)}m ${eta % 60}s`;
+        ctx.log(`  ${chalk.cyan('ETA:')}         ${etaStr}`);
+      }
+    }
+
+    if (bgStatus.startedAt) {
+      const elapsed = Math.round((Date.now() - bgStatus.startedAt) / 1000);
+      const elapsedStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+      ctx.log(`  ${chalk.cyan('Elapsed:')}     ${elapsedStr}`);
+    }
+
+    ctx.log('');
+    ctx.log(chalk.dim(`Use ${chalk.cyan('/index cancel')} to stop indexing.`));
+    ctx.log('');
+    return true;
+  }
+
+  // Not currently indexing - show idle state
+  ctx.log(`${chalk.cyan('State:')}          ${chalk.green('idle')}`);
+
   // Get the most recently indexed project (by indexed_at timestamp)
   const lastIndexed = db
     .prepare(
       'SELECT * FROM projects WHERE indexed_at IS NOT NULL ORDER BY indexed_at DESC LIMIT 1'
     )
     .get() as Project | undefined;
-
-  ctx.log('');
-  ctx.log(chalk.bold('Index Status'));
-  ctx.log(chalk.dim('─'.repeat(35)));
-  ctx.log(`${chalk.cyan('State:')}          ${chalk.green('idle')}`);
 
   if (lastIndexed) {
     const indexedAt = new Date(lastIndexed.indexed_at!);
@@ -423,11 +478,32 @@ async function handleIndexCommand(
     return handleIndexStatusCommand(state, ctx);
   }
 
+  // Handle /index cancel subcommand
+  if (subcommand === 'cancel') {
+    const coordinator = getBackgroundIndexingCoordinator();
+    if (coordinator.cancel()) {
+      ctx.log(chalk.yellow('Cancelling indexing...'));
+    } else {
+      ctx.log(chalk.dim('No indexing operation in progress.'));
+    }
+    return true;
+  }
+
   if (!inputPath) {
-    ctx.log(chalk.yellow('Usage: /index <path> [-n name] [--force] | status'));
+    ctx.log(chalk.yellow('Usage: /index <path> [-n name] [--force] | status | cancel'));
     ctx.log(chalk.dim('Example: /index ./my-project'));
     ctx.log(chalk.dim('         /index ../other-repo -n my-app'));
     ctx.log(chalk.dim('         /index status'));
+    ctx.log(chalk.dim('         /index cancel'));
+    return true;
+  }
+
+  // Check if indexing is already running
+  const coordinator = getBackgroundIndexingCoordinator();
+  if (coordinator.isRunning()) {
+    const status = coordinator.getStatus();
+    ctx.log(chalk.yellow(`Indexing already in progress: ${status.projectName}`));
+    ctx.log(chalk.dim('Use /index status to check progress, /index cancel to stop.'));
     return true;
   }
 
@@ -498,18 +574,10 @@ async function handleIndexCommand(
     return true;
   }
 
-  // 6. Create progress reporter (same as `ctx index`)
-  const reporter = createProgressReporter({
-    json: ctx.options.json,
-    verbose: ctx.options.verbose,
-    noColor: !!process.env.NO_COLOR,
-    isInteractive: process.stdout.isTTY ?? false,
-  });
-
-  // 7. Run the indexing pipeline
-  let result: IndexPipelineResult;
-  try {
-    result = await runIndexPipeline({
+  // 6. Start background indexing (non-blocking)
+  // The status bar will show progress below the chat input
+  coordinator.start({
+    pipelineOptions: {
       projectPath,
       projectName,
       projectId: existingProject?.id,
@@ -518,75 +586,99 @@ async function handleIndexCommand(
       embeddingDimensions,
       embeddingTimeout: state.config.embedding.timeout_ms,
       chunkerConfig: { embeddingProvider },
-      onStageStart: (stage, total) => reporter.startStage(stage, total),
-      onProgress: (_stage, processed, _total, currentFile) =>
-        reporter.updateProgress(processed, currentFile),
-      onStageComplete: (_stage, stats) => reporter.completeStage(stats),
-      onWarning: (message, context) => reporter.warn(message, context),
-      onError: (error, context) => reporter.error(error.message, context),
-    });
-  } catch (error) {
-    ctx.error(`Indexing failed: ${(error as Error).message}`);
-    ctx.log(chalk.dim('Try running: ctx index <path> for detailed diagnostics'));
-    return true;
-  }
+    },
+    statusBarOptions: {
+      terminalWidth: process.stdout.columns,
+      noColor: !!process.env.NO_COLOR,
+    },
+    readline: state.rl,
 
-  // 8. Show summary
-  reporter.showSummary(result);
+    // Handle successful completion
+    onComplete: async (result) => {
+      ctx.log('');
+      ctx.log(chalk.green(`✓ Indexed ${result.projectName}`));
+      ctx.log(
+        chalk.dim(
+          `  ${result.filesIndexed} files, ${result.chunksStored.toLocaleString()} chunks`
+        )
+      );
 
-  // 9. Auto-focus on the newly indexed project
-  try {
-    const newProject = db.getProjectById(result.projectId);
-    if (newProject) {
-      const newRagEngine = await createRAGEngine(state.config, result.projectId);
+      // Auto-focus on the newly indexed project
+      try {
+        const newProject = db.getProjectById(result.projectId);
+        if (newProject) {
+          const newRagEngine = await createRAGEngine(state.config, result.projectId);
 
-      // Dispose old RAG engine if exists (releases memory)
-      state.ragEngine?.dispose();
+          // Dispose old RAG engine if exists (releases memory)
+          state.ragEngine?.dispose();
 
-      state.currentProject = newProject;
-      state.ragEngine = newRagEngine;
-      updatePrompt(state);
+          state.currentProject = newProject;
+          state.ragEngine = newRagEngine;
+          updatePrompt(state);
 
-      // Update router's project list with newly indexed project
-      if (state.queryRouter) {
-        const rawDb = getDb();
-        const allProjectsRaw = rawDb
-          .prepare('SELECT id, name, description, tags, file_count, chunk_count FROM projects')
-          .all() as Array<{
-            id: string;
-            name: string;
-            description: string | null;
-            tags: string | null;
-            file_count: number;
-            chunk_count: number;
-          }>;
+          // Update router's project list with newly indexed project
+          if (state.queryRouter) {
+            const rawDb = getDb();
+            const allProjectsRaw = rawDb
+              .prepare(
+                'SELECT id, name, description, tags, file_count, chunk_count FROM projects'
+              )
+              .all() as Array<{
+                id: string;
+                name: string;
+                description: string | null;
+                tags: string | null;
+                file_count: number;
+                chunk_count: number;
+              }>;
 
-        state.allProjects = allProjectsRaw.map((p) => ({
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          tags: safeParseJsonArray(p.tags),
-          fileCount: p.file_count,
-          chunkCount: p.chunk_count,
-        }));
+            state.allProjects = allProjectsRaw.map((p) => ({
+              id: p.id,
+              name: p.name,
+              description: p.description,
+              tags: safeParseJsonArray(p.tags),
+              fileCount: p.file_count,
+              chunkCount: p.chunk_count,
+            }));
 
-        state.queryRouter.updateProjects(state.allProjects);
-        ctx.debug(`Updated router with ${state.allProjects.length} projects`);
+            state.queryRouter.updateProjects(state.allProjects);
+            ctx.debug(`Updated router with ${state.allProjects.length} projects`);
+          }
+
+          ctx.log(chalk.blue(`Now focused on: ${result.projectName}`));
+          ctx.log(chalk.dim('Ask questions about your code, or use /unfocus to clear focus'));
+        }
+      } catch (error) {
+        // Non-fatal: indexing succeeded, just couldn't auto-focus
+        ctx.log(
+          chalk.yellow(
+            `Indexed successfully, but auto-focus failed: ${(error as Error).message}`
+          )
+        );
+        ctx.log(chalk.dim(`Use /focus ${result.projectName} to focus manually`));
       }
 
-      ctx.log(chalk.blue(`Now focused on: ${result.projectName}`));
-      ctx.log(chalk.dim('Ask questions about your code, or use /unfocus to clear focus'));
-    }
-  } catch (error) {
-    // Non-fatal: indexing succeeded, just couldn't auto-focus
-    ctx.log(
-      chalk.yellow(
-        `Indexed successfully, but auto-focus failed: ${(error as Error).message}`
-      )
-    );
-    ctx.log(chalk.dim(`Use /focus ${result.projectName} to focus manually`));
-  }
+      ctx.log('');
+      state.rl?.prompt();
+    },
 
+    // Handle errors
+    onError: (error) => {
+      ctx.error(`Indexing failed: ${error.message}`);
+      ctx.log(chalk.dim('Try running: ctx index <path> for detailed diagnostics'));
+      state.rl?.prompt();
+    },
+
+    // Handle cancellation
+    onCancelled: () => {
+      ctx.log(chalk.yellow('Indexing cancelled.'));
+      state.rl?.prompt();
+    },
+  });
+
+  // Return immediately - indexing continues in background
+  ctx.log(chalk.blue(`Started indexing: ${projectName}`));
+  ctx.log(chalk.dim('Chat is available. Use /index status or /index cancel.'));
   ctx.log('');
   return true;
 }
@@ -1618,7 +1710,21 @@ async function runChatREPL(
     });
 
     // Handle Ctrl+C gracefully
+    // First Ctrl+C cancels background indexing if running
+    // Second Ctrl+C (or first if no indexing) exits chat
     rl.on('SIGINT', () => {
+      const coordinator = getBackgroundIndexingCoordinator();
+
+      // If indexing is running, first Ctrl+C cancels it
+      if (coordinator.isRunning()) {
+        coordinator.cancel();
+        ctx.log('');
+        ctx.log(chalk.yellow('Indexing cancelled.'));
+        rl.prompt();
+        return;
+      }
+
+      // No indexing running - exit chat
       ctx.log('');
       ctx.log(chalk.dim('Goodbye!'));
       cleanup();
