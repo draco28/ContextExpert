@@ -2,6 +2,7 @@
  * Environment Variable Handler
  *
  * Loads and provides secure access to LLM API keys.
+ * Supports .env files for local development via dotenv.
  *
  * SECURITY NOTES:
  * - Keys are NEVER logged, even in verbose mode
@@ -9,7 +10,12 @@
  * - Only key presence/absence and format validity are reported
  */
 
+import { config as dotenvConfig } from 'dotenv';
 import { z } from 'zod';
+
+// Load .env file (for local development)
+// No-op if .env doesn't exist - production uses real env vars
+dotenvConfig();
 
 // ============================================================================
 // SCHEMA DEFINITIONS
@@ -25,6 +31,10 @@ export const EnvSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
   OLLAMA_HOST: z.string().default('http://localhost:11434'),
+  // OpenAI-compatible provider (Z.AI, OpenRouter, etc.)
+  OPENAI_COMPATIBLE_API_KEY: z.string().optional(),
+  OPENAI_COMPATIBLE_BASE_URL: z.string().optional(),
+  OPENAI_COMPATIBLE_MODEL: z.string().optional(),
 });
 
 export type EnvVars = z.infer<typeof EnvSchema>;
@@ -63,6 +73,9 @@ export function loadEnv(): EnvVars {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     OLLAMA_HOST: process.env.OLLAMA_HOST,
+    OPENAI_COMPATIBLE_API_KEY: process.env.OPENAI_COMPATIBLE_API_KEY,
+    OPENAI_COMPATIBLE_BASE_URL: process.env.OPENAI_COMPATIBLE_BASE_URL,
+    OPENAI_COMPATIBLE_MODEL: process.env.OPENAI_COMPATIBLE_MODEL,
   });
 
   if (!result.success) {
@@ -72,6 +85,9 @@ export function loadEnv(): EnvVars {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
       OLLAMA_HOST: process.env.OLLAMA_HOST ?? 'http://localhost:11434',
+      OPENAI_COMPATIBLE_API_KEY: process.env.OPENAI_COMPATIBLE_API_KEY,
+      OPENAI_COMPATIBLE_BASE_URL: process.env.OPENAI_COMPATIBLE_BASE_URL,
+      OPENAI_COMPATIBLE_MODEL: process.env.OPENAI_COMPATIBLE_MODEL,
     };
   } else {
     _envCache = result.data;
@@ -99,16 +115,18 @@ export function getEnv<K extends keyof EnvVars>(key: K): EnvVars[K] {
  * This is the security-safe way to check key presence in conditionals
  * and error messages.
  *
- * @param provider - The provider to check ('anthropic' or 'openai')
+ * @param provider - The provider to check ('anthropic', 'openai', or 'openai-compatible')
  * @returns true if the key exists and is non-empty
  */
-export function hasApiKey(provider: 'anthropic' | 'openai'): boolean {
+export function hasApiKey(provider: 'anthropic' | 'openai' | 'openai-compatible'): boolean {
   const env = loadEnv();
   switch (provider) {
     case 'anthropic':
       return Boolean(env.ANTHROPIC_API_KEY?.trim());
     case 'openai':
       return Boolean(env.OPENAI_API_KEY?.trim());
+    case 'openai-compatible':
+      return Boolean(env.OPENAI_COMPATIBLE_API_KEY?.trim());
   }
 }
 
@@ -120,6 +138,36 @@ export function hasApiKey(provider: 'anthropic' | 'openai'): boolean {
  */
 export function getOllamaHost(): string {
   return getEnv('OLLAMA_HOST');
+}
+
+/**
+ * Get OpenAI-compatible provider configuration.
+ * Used for Z.AI, OpenRouter, and other OpenAI-compatible APIs.
+ *
+ * @returns Object with apiKey, baseUrl, and model (all optional)
+ */
+export function getOpenAICompatibleConfig(): {
+  apiKey: string | undefined;
+  baseUrl: string | undefined;
+  model: string | undefined;
+} {
+  const env = loadEnv();
+  return {
+    apiKey: env.OPENAI_COMPATIBLE_API_KEY,
+    baseUrl: env.OPENAI_COMPATIBLE_BASE_URL,
+    model: env.OPENAI_COMPATIBLE_MODEL,
+  };
+}
+
+/**
+ * Check if OpenAI-compatible provider is fully configured.
+ * Requires API key and base URL at minimum.
+ *
+ * @returns true if ready to use
+ */
+export function isOpenAICompatibleConfigured(): boolean {
+  const config = getOpenAICompatibleConfig();
+  return Boolean(config.apiKey?.trim() && config.baseUrl?.trim());
 }
 
 /**
@@ -145,7 +193,7 @@ export function _clearEnvCache(): void {
  * - Exact commands to run
  * - Platform-specific instructions
  */
-export const SETUP_INSTRUCTIONS: Record<'anthropic' | 'openai' | 'ollama', string> = {
+export const SETUP_INSTRUCTIONS: Record<'anthropic' | 'openai' | 'ollama' | 'openai-compatible', string> = {
   anthropic: `
 To use Anthropic (Claude) models:
 
@@ -191,5 +239,25 @@ To use Ollama (local models):
 4. (Optional) Set custom host:
 
    export OLLAMA_HOST="http://localhost:11434"
+`.trim(),
+
+  'openai-compatible': `
+To use an OpenAI-compatible provider (Z.AI, OpenRouter, etc.):
+
+1. Create a .env file in the project root (copy from .env.example)
+
+2. Set the environment variables:
+
+   OPENAI_COMPATIBLE_API_KEY="your-api-key"
+   OPENAI_COMPATIBLE_BASE_URL="https://api.example.com/v1"
+   OPENAI_COMPATIBLE_MODEL="model-name"
+
+3. Example for Z.AI:
+
+   OPENAI_COMPATIBLE_API_KEY="your-zai-key"
+   OPENAI_COMPATIBLE_BASE_URL="https://api.z.ai/api/coding/paas/v4"
+   OPENAI_COMPATIBLE_MODEL="GLM-4.7"
+
+4. Restart your terminal or rebuild the project
 `.trim(),
 };

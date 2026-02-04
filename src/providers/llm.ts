@@ -21,6 +21,10 @@
 
 import type { LLMProvider } from '@contextaisdk/core';
 import type { Config } from '../config/schema.js';
+import {
+  isOpenAICompatibleConfigured,
+  getOpenAICompatibleConfig,
+} from '../config/env.js';
 
 import {
   createAnthropicProvider,
@@ -43,7 +47,7 @@ import {
 // ============================================================================
 
 /** Supported LLM provider types */
-export type ProviderType = 'anthropic' | 'openai' | 'ollama';
+export type ProviderType = 'anthropic' | 'openai' | 'ollama' | 'openai-compatible';
 
 /**
  * Result of creating an LLM provider.
@@ -170,36 +174,72 @@ export interface LLMProviderOptions {
 // ============================================================================
 
 /**
- * Default fallback chain for each provider.
- * When primary fails, try these in order.
+ * Get default fallback chain for a provider.
+ * Dynamically includes openai-compatible if configured via env vars.
  */
-const DEFAULT_FALLBACK_CHAINS: Record<ProviderType, ProviderType[]> = {
-  anthropic: ['openai', 'ollama'],
-  openai: ['anthropic', 'ollama'],
-  ollama: ['anthropic', 'openai'],
-};
+function getDefaultFallbackChain(primary: ProviderType): ProviderType[] {
+  const hasOpenAICompatible = isOpenAICompatibleConfigured();
+
+  // Base chains without openai-compatible
+  const baseChains: Record<ProviderType, ProviderType[]> = {
+    anthropic: ['openai', 'ollama'],
+    openai: ['anthropic', 'ollama'],
+    ollama: ['anthropic', 'openai'],
+    'openai-compatible': ['anthropic', 'openai', 'ollama'],
+  };
+
+  const chain = baseChains[primary];
+
+  // If openai-compatible is configured and not the primary, add it as first fallback
+  if (hasOpenAICompatible && primary !== 'openai-compatible') {
+    return ['openai-compatible', ...chain];
+  }
+
+  return chain;
+}
+
+/**
+ * Get default model for openai-compatible provider from env vars.
+ */
+function getOpenAICompatibleModel(): string {
+  const config = getOpenAICompatibleConfig();
+  return config.model ?? 'gpt-4o'; // Fallback to gpt-4o format
+}
 
 /**
  * Default model to use when falling back to a different provider.
  * Maps fromProvider -> toProvider -> model.
  */
-const DEFAULT_MODEL_EQUIVALENTS: Record<ProviderType, Record<ProviderType, string>> = {
-  anthropic: {
-    anthropic: DEFAULT_ANTHROPIC_MODEL,
-    openai: DEFAULT_OPENAI_MODEL,
-    ollama: DEFAULT_OLLAMA_MODEL,
-  },
-  openai: {
-    anthropic: DEFAULT_ANTHROPIC_MODEL,
-    openai: DEFAULT_OPENAI_MODEL,
-    ollama: DEFAULT_OLLAMA_MODEL,
-  },
-  ollama: {
-    anthropic: DEFAULT_ANTHROPIC_MODEL,
-    openai: DEFAULT_OPENAI_MODEL,
-    ollama: DEFAULT_OLLAMA_MODEL,
-  },
-};
+function getModelEquivalent(fromProvider: ProviderType, toProvider: ProviderType): string {
+  if (toProvider === 'openai-compatible') {
+    return getOpenAICompatibleModel();
+  }
+
+  const equivalents: Record<ProviderType, Record<Exclude<ProviderType, 'openai-compatible'>, string>> = {
+    anthropic: {
+      anthropic: DEFAULT_ANTHROPIC_MODEL,
+      openai: DEFAULT_OPENAI_MODEL,
+      ollama: DEFAULT_OLLAMA_MODEL,
+    },
+    openai: {
+      anthropic: DEFAULT_ANTHROPIC_MODEL,
+      openai: DEFAULT_OPENAI_MODEL,
+      ollama: DEFAULT_OLLAMA_MODEL,
+    },
+    ollama: {
+      anthropic: DEFAULT_ANTHROPIC_MODEL,
+      openai: DEFAULT_OPENAI_MODEL,
+      ollama: DEFAULT_OLLAMA_MODEL,
+    },
+    'openai-compatible': {
+      anthropic: DEFAULT_ANTHROPIC_MODEL,
+      openai: DEFAULT_OPENAI_MODEL,
+      ollama: DEFAULT_OLLAMA_MODEL,
+    },
+  };
+
+  return equivalents[fromProvider][toProvider as Exclude<ProviderType, 'openai-compatible'>];
+}
 
 /**
  * Known capabilities per provider.
@@ -209,6 +249,7 @@ const PROVIDER_CAPABILITIES: Record<ProviderType, Set<string>> = {
   anthropic: new Set(['vision', 'extended-thinking', 'streaming', 'tool-use']),
   openai: new Set(['vision', 'streaming', 'tool-use', 'json-mode']),
   ollama: new Set(['streaming', 'tool-use']), // Most local models lack vision
+  'openai-compatible': new Set(['streaming', 'tool-use']), // Varies by provider
 };
 
 // ============================================================================
@@ -218,14 +259,15 @@ const PROVIDER_CAPABILITIES: Record<ProviderType, Set<string>> = {
 /**
  * Get the fallback chain for a provider.
  * Uses config if specified, otherwise uses defaults.
+ * Dynamically includes openai-compatible if configured via env vars.
  */
 function getFallbackChain(config: Config, primary: ProviderType): ProviderType[] {
   // If config specifies fallback_providers, use those (filtering out primary)
   if (config.llm?.fallback_providers) {
     return config.llm.fallback_providers.filter((p) => p !== primary);
   }
-  // Otherwise use default chain
-  return DEFAULT_FALLBACK_CHAINS[primary];
+  // Otherwise use dynamic default chain
+  return getDefaultFallbackChain(primary);
 }
 
 /**
@@ -233,7 +275,7 @@ function getFallbackChain(config: Config, primary: ProviderType): ProviderType[]
  */
 function getFallbackModel(
   config: Config,
-  _fromProvider: ProviderType,
+  fromProvider: ProviderType,
   toProvider: ProviderType
 ): string {
   // Check config for explicit mapping first
@@ -242,7 +284,7 @@ function getFallbackModel(
     return configModel;
   }
   // Use default model for the target provider
-  return DEFAULT_MODEL_EQUIVALENTS[toProvider][toProvider];
+  return getModelEquivalent(fromProvider, toProvider);
 }
 
 /**
@@ -311,6 +353,30 @@ async function tryCreateProvider(
       return {
         provider: result.provider,
         name: result.name,
+        model: result.model,
+      };
+    }
+
+    case 'openai-compatible': {
+      // Use OpenAI provider factory with custom baseURL from env vars
+      const compatConfig = getOpenAICompatibleConfig();
+      if (!compatConfig.apiKey || !compatConfig.baseUrl) {
+        throw new Error(
+          'OpenAI-compatible provider not configured. Set OPENAI_COMPATIBLE_API_KEY and OPENAI_COMPATIBLE_BASE_URL in .env'
+        );
+      }
+
+      const result = await createOpenAIProvider({
+        model: model || compatConfig.model || 'gpt-4o',
+        apiKey: compatConfig.apiKey,
+        baseURL: compatConfig.baseUrl,
+        skipAvailabilityCheck,
+        ...options.openai, // Allow additional OpenAI options
+      });
+
+      return {
+        provider: result.provider,
+        name: 'openai-compatible',
         model: result.model,
       };
     }

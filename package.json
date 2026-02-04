@@ -18,6 +18,10 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "start": "node ./dist/cli.js",
+    "dev:chat": "node ./dist/cli.js chat",
+    "dev:index": "node ./dist/cli.js index",
+    "dev:ask": "node ./dist/cli.js ask",
+    "dev:search": "node ./dist/cli.js search",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run",
@@ -67,6 +71,7 @@
     "better-sqlite3": "^12.6.2",
     "chalk": "^5.3.0",
     "commander": "^12.1.0",
+    "dotenv": "^17.2.3",
     "fast-glob": "^3.3.3",
     "ignore": "^7.0.5",
     "marked": "^17.0.1",
@@ -80,10 +85,10 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.0",
+    "@vitest/coverage-v8": "^1.6.0",
     "tsup": "^8.1.0",
     "tsx": "^4.21.0",
     "typescript": "^5.5.0",
-    "@vitest/coverage-v8": "^1.6.0",
     "vitest": "^1.6.0"
   },
   "pnpm": {
@@ -93,7 +98,9 @@
       "tree-sitter",
       "tree-sitter-javascript",
       "tree-sitter-python",
-      "tree-sitter-typescript"
+      "tree-sitter-typescript",
+      "sharp",
+      "protobufjs"
     ]
   }
 }

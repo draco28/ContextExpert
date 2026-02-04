@@ -25,6 +25,16 @@ vi.mock('../ollama.js', () => ({
   DEFAULT_OLLAMA_MODEL: 'llama3.2',
 }));
 
+// Mock env functions so .env file doesn't affect tests
+vi.mock('../../config/env.js', () => ({
+  isOpenAICompatibleConfigured: vi.fn().mockReturnValue(false),
+  getOpenAICompatibleConfig: vi.fn().mockReturnValue({
+    apiKey: undefined,
+    baseUrl: undefined,
+    model: undefined,
+  }),
+}));
+
 // Import after mocking
 import { createAnthropicProvider } from '../anthropic.js';
 import { createOpenAIProvider } from '../openai.js';
