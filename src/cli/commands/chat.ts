@@ -606,14 +606,31 @@ async function handleIndexCommand(
       noColor: !!process.env.NO_COLOR,
     },
     readline: state.tui ? undefined : state.rl,
-    // Route progress to TUI status line when in TUI mode
-    onProgress: state.tui ? (data) => {
-      state.tui!.setIndexingStatus({
-        projectName: data.projectName,
-        progress: data.total > 0 ? (data.processed / data.total) * 100 : 0,
-        stage: data.stage,
-      });
-    } : undefined,
+    // Route progress to TUI status line when in TUI mode.
+    // Throttled to prevent flooding stdout with ANSI writes — each
+    // setIndexingStatus() triggers a full status bar re-render (~7 escape
+    // sequences). Without throttling, hundreds of progress events/sec
+    // during embedding would starve readline of event-loop time.
+    onProgress: state.tui ? (() => {
+      let lastUpdateTime = 0;
+      let lastPercent = -1;
+      return (data: { stage: string; processed: number; total: number; projectName: string }) => {
+        const now = performance.now();
+        const percent = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
+        const significantProgress = percent >= lastPercent + 5;
+        const throttleExpired = now - lastUpdateTime >= 500;
+
+        if (significantProgress || throttleExpired) {
+          lastUpdateTime = now;
+          lastPercent = percent;
+          state.tui!.setIndexingStatus({
+            projectName: data.projectName,
+            progress: percent,
+            stage: data.stage,
+          });
+        }
+      };
+    })() : undefined,
 
     // Handle successful completion
     onComplete: async (result) => {
