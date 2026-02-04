@@ -587,150 +587,262 @@ async function handleIndexCommand(
     return true;
   }
 
-  // 6. Start background indexing (non-blocking)
-  // The status bar will show progress below the chat input
-  coordinator.start({
-    pipelineOptions: {
-      projectPath,
-      projectName,
-      projectId: existingProject?.id,
-      embeddingProvider,
-      embeddingModel,
-      embeddingDimensions,
-      embeddingTimeout: state.config.embedding.timeout_ms,
-      // Omit embeddingProvider from chunkerConfig for background indexing:
-      // this disables SemanticChunker for markdown files, which would otherwise
-      // make ~10-20 blocking embedding calls PER markdown file during chunking.
-      // RecursiveChunker is used instead (fast, CPU-only, good-enough quality).
-      chunkerConfig: {},
-      // Small batch size for background indexing: creates frequent event-loop
-      // yield points, keeping TUI/REPL responsive during embedding.
-      embeddingBatchSize: 4,
-    },
-    // Skip StatusBarRenderer in TUI mode — progress routes via TUI status line
-    statusBarOptions: state.tui ? undefined : {
-      terminalWidth: process.stdout.columns,
-      noColor: !!process.env.NO_COLOR,
-    },
-    readline: state.tui ? undefined : state.rl,
-    // Route progress to TUI status line when in TUI mode.
-    // Throttled to prevent flooding stdout with ANSI writes — each
-    // setIndexingStatus() triggers a full status bar re-render (~7 escape
-    // sequences). Without throttling, hundreds of progress events/sec
-    // during embedding would starve readline of event-loop time.
-    onProgress: state.tui ? (() => {
-      let lastUpdateTime = 0;
-      let lastPercent = -1;
-      return (data: { stage: string; processed: number; total: number; projectName: string }) => {
-        const now = performance.now();
-        const percent = data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0;
-        const significantProgress = percent >= lastPercent + 5;
-        const throttleExpired = now - lastUpdateTime >= 500;
+  // 6. Start indexing
+  // In TUI mode: blocking with progress display (input disabled until complete)
+  // In classic REPL: background with StatusBarRenderer (chat available)
 
-        if (significantProgress || throttleExpired) {
-          lastUpdateTime = now;
-          lastPercent = percent;
-          state.tui!.setIndexingStatus({
-            projectName: data.projectName,
-            progress: percent,
-            stage: data.stage,
-          });
-        }
-      };
-    })() : undefined,
+  if (state.tui) {
+    // ── BLOCKING MODE (TUI) ────────────────────────────────────────
+    // Await indexing completion. Input is naturally blocked by
+    // InputManager.isProcessing guard. Ctrl+C cancellation works via
+    // the SIGINT handler in runChatTUI which calls coordinator.cancel().
 
-    // Handle successful completion
-    onComplete: async (result) => {
-      // Clear TUI indexing status
-      state.tui?.setIndexingStatus(undefined);
-      ctx.log('');
-      ctx.log(chalk.green(`✓ Indexed ${result.projectName}`));
-      ctx.log(
-        chalk.dim(
-          `  ${result.filesIndexed} files, ${result.chunksStored.toLocaleString()} chunks`
-        )
-      );
+    // Change prompt to indicate indexing mode
+    state.tui.setPrompt(chalk.dim('Indexing... (Ctrl+C to cancel) '));
+    state.tui.prompt();
+    ctx.log(chalk.blue(`Indexing: ${projectName}`));
 
-      // Auto-focus on the newly indexed project
-      try {
-        const newProject = db.getProjectById(result.projectId);
-        if (newProject) {
-          const newRagEngine = await createRAGEngine(state.config, result.projectId);
+    // Track stage changes for chat area messages
+    let currentStage: string | null = null;
 
-          // Dispose old RAG engine if exists (releases memory)
-          state.ragEngine?.dispose();
+    await new Promise<void>((resolve) => {
+      coordinator.start({
+        pipelineOptions: {
+          projectPath,
+          projectName,
+          projectId: existingProject?.id,
+          embeddingProvider,
+          embeddingModel,
+          embeddingDimensions,
+          embeddingTimeout: state.config.embedding.timeout_ms,
+          chunkerConfig: { embeddingProvider },
+          useStaging: !!existingProject && force,
+          // Balanced batch size: good throughput + enough yield points
+          // for progress events and cancellation checks
+          embeddingBatchSize: 16,
+        },
+        // No StatusBarRenderer or readline in TUI mode
+        statusBarOptions: undefined,
+        readline: undefined,
 
-          state.currentProject = newProject;
-          state.ragEngine = newRagEngine;
-          updatePrompt(state);
+        // Progress → status bar + stage messages in chat area
+        onProgress: (() => {
+          let lastUpdateTime = 0;
+          return (data: { stage: string; processed: number; total: number; projectName: string }) => {
+            // Detect stage transitions → show milestone in chat area
+            if (data.stage !== currentStage) {
+              currentStage = data.stage;
+              const labels: Record<string, string> = {
+                scanning: 'Scanning files...',
+                chunking: 'Chunking files...',
+                embedding: 'Embedding chunks...',
+                storing: 'Storing data...',
+              };
+              ctx.log(chalk.dim(labels[data.stage] ?? data.stage));
+            }
 
-          // Update router's project list with newly indexed project
-          if (state.queryRouter) {
-            const rawDb = getDb();
-            const allProjectsRaw = rawDb
-              .prepare(
-                'SELECT id, name, description, tags, file_count, chunk_count FROM projects'
+            // Throttle status bar updates to 200ms to avoid excessive ANSI writes
+            const now = performance.now();
+            if (now - lastUpdateTime >= 200) {
+              lastUpdateTime = now;
+              const percent = data.total > 0
+                ? Math.round((data.processed / data.total) * 100) : 0;
+              state.tui!.setIndexingStatus({
+                projectName: data.projectName,
+                progress: percent,
+                stage: data.stage,
+              });
+            }
+          };
+        })(),
+
+        onComplete: async (result) => {
+          state.tui!.setIndexingStatus(undefined);
+          ctx.log('');
+          ctx.log(chalk.green(`✓ Indexed ${result.projectName}`));
+          ctx.log(
+            chalk.dim(
+              `  ${result.filesIndexed} files, ${result.chunksStored.toLocaleString()} chunks`
+            )
+          );
+
+          // Auto-focus on the newly indexed project
+          try {
+            const newProject = db.getProjectById(result.projectId);
+            if (newProject) {
+              const newRagEngine = await createRAGEngine(state.config, result.projectId);
+              state.ragEngine?.dispose();
+              state.currentProject = newProject;
+              state.ragEngine = newRagEngine;
+              updatePrompt(state);
+
+              if (state.queryRouter) {
+                const rawDb = getDb();
+                const allProjectsRaw = rawDb
+                  .prepare(
+                    'SELECT id, name, description, tags, file_count, chunk_count FROM projects'
+                  )
+                  .all() as Array<{
+                    id: string;
+                    name: string;
+                    description: string | null;
+                    tags: string | null;
+                    file_count: number;
+                    chunk_count: number;
+                  }>;
+
+                state.allProjects = allProjectsRaw.map((p) => ({
+                  id: p.id,
+                  name: p.name,
+                  description: p.description,
+                  tags: safeParseJsonArray(p.tags),
+                  fileCount: p.file_count,
+                  chunkCount: p.chunk_count,
+                }));
+
+                state.queryRouter.updateProjects(state.allProjects);
+                ctx.debug(`Updated router with ${state.allProjects.length} projects`);
+              }
+
+              ctx.log(chalk.blue(`Now focused on: ${result.projectName}`));
+              ctx.log(chalk.dim('Ask questions about your code, or use /unfocus to clear focus'));
+            }
+          } catch (error) {
+            ctx.log(
+              chalk.yellow(
+                `Indexed successfully, but auto-focus failed: ${(error as Error).message}`
               )
-              .all() as Array<{
-                id: string;
-                name: string;
-                description: string | null;
-                tags: string | null;
-                file_count: number;
-                chunk_count: number;
-              }>;
-
-            state.allProjects = allProjectsRaw.map((p) => ({
-              id: p.id,
-              name: p.name,
-              description: p.description,
-              tags: safeParseJsonArray(p.tags),
-              fileCount: p.file_count,
-              chunkCount: p.chunk_count,
-            }));
-
-            state.queryRouter.updateProjects(state.allProjects);
-            ctx.debug(`Updated router with ${state.allProjects.length} projects`);
+            );
+            ctx.log(chalk.dim(`Use /focus ${result.projectName} to focus manually`));
           }
 
-          ctx.log(chalk.blue(`Now focused on: ${result.projectName}`));
-          ctx.log(chalk.dim('Ask questions about your code, or use /unfocus to clear focus'));
-        }
-      } catch (error) {
-        // Non-fatal: indexing succeeded, just couldn't auto-focus
+          ctx.log('');
+          resolve();
+        },
+
+        onError: (error) => {
+          state.tui!.setIndexingStatus(undefined);
+          ctx.error(`Indexing failed: ${error.message}`);
+          ctx.log(chalk.dim('Try running: ctx index <path> for detailed diagnostics'));
+          resolve();
+        },
+
+        onCancelled: () => {
+          state.tui!.setIndexingStatus(undefined);
+          // SIGINT handler in runChatTUI already shows "Indexing cancelled."
+          resolve();
+        },
+      });
+    });
+
+    // Restore normal prompt after indexing completes/fails/cancels
+    state.tui.setPrompt(getPrompt(state));
+    return true;
+
+  } else {
+    // ── BACKGROUND MODE (Classic REPL) ─────────────────────────────
+    // Fire-and-forget: indexing continues while user chats
+    coordinator.start({
+      pipelineOptions: {
+        projectPath,
+        projectName,
+        projectId: existingProject?.id,
+        embeddingProvider,
+        embeddingModel,
+        embeddingDimensions,
+        embeddingTimeout: state.config.embedding.timeout_ms,
+        chunkerConfig: { embeddingProvider },
+        // Small batch size for background: frequent event-loop yields
+        // keep readline responsive during embedding
+        embeddingBatchSize: 8,
+      },
+      statusBarOptions: {
+        terminalWidth: process.stdout.columns,
+        noColor: !!process.env.NO_COLOR,
+      },
+      readline: state.rl,
+
+      onComplete: async (result) => {
+        ctx.log('');
+        ctx.log(chalk.green(`✓ Indexed ${result.projectName}`));
         ctx.log(
-          chalk.yellow(
-            `Indexed successfully, but auto-focus failed: ${(error as Error).message}`
+          chalk.dim(
+            `  ${result.filesIndexed} files, ${result.chunksStored.toLocaleString()} chunks`
           )
         );
-        ctx.log(chalk.dim(`Use /focus ${result.projectName} to focus manually`));
-      }
 
-      ctx.log('');
-      state.rl?.prompt();
-    },
+        // Auto-focus on the newly indexed project
+        try {
+          const newProject = db.getProjectById(result.projectId);
+          if (newProject) {
+            const newRagEngine = await createRAGEngine(state.config, result.projectId);
+            state.ragEngine?.dispose();
+            state.currentProject = newProject;
+            state.ragEngine = newRagEngine;
+            updatePrompt(state);
 
-    // Handle errors
-    onError: (error) => {
-      state.tui?.setIndexingStatus(undefined);
-      ctx.error(`Indexing failed: ${error.message}`);
-      ctx.log(chalk.dim('Try running: ctx index <path> for detailed diagnostics'));
-      state.rl?.prompt();
-    },
+            if (state.queryRouter) {
+              const rawDb = getDb();
+              const allProjectsRaw = rawDb
+                .prepare(
+                  'SELECT id, name, description, tags, file_count, chunk_count FROM projects'
+                )
+                .all() as Array<{
+                  id: string;
+                  name: string;
+                  description: string | null;
+                  tags: string | null;
+                  file_count: number;
+                  chunk_count: number;
+                }>;
 
-    // Handle cancellation
-    onCancelled: () => {
-      state.tui?.setIndexingStatus(undefined);
-      ctx.log(chalk.yellow('Indexing cancelled.'));
-      state.rl?.prompt();
-    },
-  });
+              state.allProjects = allProjectsRaw.map((p) => ({
+                id: p.id,
+                name: p.name,
+                description: p.description,
+                tags: safeParseJsonArray(p.tags),
+                fileCount: p.file_count,
+                chunkCount: p.chunk_count,
+              }));
 
-  // Return immediately - indexing continues in background
-  ctx.log(chalk.blue(`Started indexing: ${projectName}`));
-  ctx.log(chalk.dim('Chat is available. Use /index status or /index cancel.'));
-  ctx.log('');
-  return true;
+              state.queryRouter.updateProjects(state.allProjects);
+              ctx.debug(`Updated router with ${state.allProjects.length} projects`);
+            }
+
+            ctx.log(chalk.blue(`Now focused on: ${result.projectName}`));
+            ctx.log(chalk.dim('Ask questions about your code, or use /unfocus to clear focus'));
+          }
+        } catch (error) {
+          ctx.log(
+            chalk.yellow(
+              `Indexed successfully, but auto-focus failed: ${(error as Error).message}`
+            )
+          );
+          ctx.log(chalk.dim(`Use /focus ${result.projectName} to focus manually`));
+        }
+
+        ctx.log('');
+        state.rl?.prompt();
+      },
+
+      onError: (error) => {
+        ctx.error(`Indexing failed: ${error.message}`);
+        ctx.log(chalk.dim('Try running: ctx index <path> for detailed diagnostics'));
+        state.rl?.prompt();
+      },
+
+      onCancelled: () => {
+        ctx.log(chalk.yellow('Indexing cancelled.'));
+        state.rl?.prompt();
+      },
+    });
+
+    // Return immediately - indexing continues in background
+    ctx.log(chalk.blue(`Started indexing: ${projectName}`));
+    ctx.log(chalk.dim('Chat is available. Use /index status or /index cancel.'));
+    ctx.log('');
+    return true;
+  }
 }
 
 // ============================================================================
