@@ -598,11 +598,14 @@ async function handleIndexCommand(
       embeddingModel,
       embeddingDimensions,
       embeddingTimeout: state.config.embedding.timeout_ms,
-      chunkerConfig: { embeddingProvider },
-      // Smaller batch size for background indexing: creates 4x more event-loop
-      // yield points than the default (32), keeping TUI/REPL responsive at a
-      // minor throughput cost (~5% slower due to more batch overhead).
-      embeddingBatchSize: 8,
+      // Omit embeddingProvider from chunkerConfig for background indexing:
+      // this disables SemanticChunker for markdown files, which would otherwise
+      // make ~10-20 blocking embedding calls PER markdown file during chunking.
+      // RecursiveChunker is used instead (fast, CPU-only, good-enough quality).
+      chunkerConfig: {},
+      // Small batch size for background indexing: creates frequent event-loop
+      // yield points, keeping TUI/REPL responsive during embedding.
+      embeddingBatchSize: 4,
     },
     // Skip StatusBarRenderer in TUI mode — progress routes via TUI status line
     statusBarOptions: state.tui ? undefined : {
