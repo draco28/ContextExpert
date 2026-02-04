@@ -11,6 +11,8 @@ opencode.json
 # Project documentation (private)
 SPEC.md
 discussion_file.md
+CLAUDE.md
+AGENTS.md
 
 # Node.js
 node_modules/
