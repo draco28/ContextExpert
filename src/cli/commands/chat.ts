@@ -2256,7 +2256,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
   return new Command('chat')
     .description('Interactive multi-turn chat with RAG-powered Q&A')
     .option('-p, --project <name>', 'Start focused on a specific project')
-    .option('--no-tui', 'Disable TUI mode (use classic readline REPL)')
+    .option('--no-tui', 'Disable TUI mode (status bar, scroll regions) and use classic readline REPL')
     .action(async (cmdOptions: ChatCommandOptions) => {
       const ctx = getContext();
 

@@ -72,6 +72,9 @@ export const ANSI = {
 /**
  * Options for TerminalRegionManager initialization.
  */
+/** Minimum rows needed for 3-region layout (chat + status + input). */
+const MIN_TERMINAL_ROWS = 3;
+
 export interface TerminalRegionManagerOptions {
   /** Height of status bar in lines (default: 1) */
   statusBarHeight?: number;
@@ -176,16 +179,19 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
    * Update terminal dimensions from stdout.
    */
   private updateDimensions(): void {
-    this.rows = this.stdout.rows ?? 24;
-    this.cols = this.stdout.columns ?? 80;
+    this.rows = this.stdout.rows || 24;   // || catches both null/undefined and 0
+    this.cols = this.stdout.columns || 80;
   }
 
   /**
    * Compute region bounds based on current terminal size.
    */
   private computeRegions(): void {
+    // Clamp rows to minimum to prevent negative region bounds
+    const rows = Math.max(this.rows, MIN_TERMINAL_ROWS);
+
     // Input area is at the very bottom
-    const inputEnd = this.rows;
+    const inputEnd = rows;
     const inputStart = inputEnd - this.inputAreaHeight + 1;
 
     // Status bar is just above input
@@ -194,7 +200,7 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
 
     // Chat area fills the rest (from top to just above status)
     const chatStart = 1;
-    const chatEnd = statusStart - 1;
+    const chatEnd = Math.max(chatStart, statusStart - 1);
 
     this.chatRegion = { startRow: chatStart, endRow: chatEnd };
     this.statusRegion = { startRow: statusStart, endRow: statusEnd };
@@ -214,23 +220,27 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
    * Handle terminal resize events.
    */
   private handleResize(): void {
-    const oldRows = this.rows;
-    const oldCols = this.cols;
+    try {
+      const oldRows = this.rows;
+      const oldCols = this.cols;
 
-    this.updateDimensions();
+      this.updateDimensions();
 
-    // Only recompute if dimensions actually changed
-    if (this.rows !== oldRows || this.cols !== oldCols) {
-      this.computeRegions();
-      this.applyScrollRegion();
+      // Only recompute if dimensions actually changed
+      if (this.rows !== oldRows || this.cols !== oldCols) {
+        this.computeRegions();
+        this.applyScrollRegion();
 
-      // If streaming, reposition cursor to end of new chat region —
-      // the old cursor position may now be outside the updated region
-      if (this._isStreaming) {
-        this.write(ANSI.cursorTo(this.chatRegion.endRow));
+        // If streaming, reposition cursor to end of new chat region —
+        // the old cursor position may now be outside the updated region
+        if (this._isStreaming) {
+          this.write(ANSI.cursorTo(this.chatRegion.endRow));
+        }
+
+        this.emit('resize', { rows: this.rows, cols: this.cols });
       }
-
-      this.emit('resize', { rows: this.rows, cols: this.cols });
+    } catch {
+      // Resize failures are non-fatal — layout may be stale but TUI continues
     }
   }
 
@@ -436,7 +446,14 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
    * Write output to stdout.
    */
   private write(data: string): void {
-    this.stdout.write(data);
+    try {
+      this.stdout.write(data);
+    } catch (error: unknown) {
+      // EPIPE is expected when stdout is piped to a closed consumer (e.g., | head)
+      if ((error as NodeJS.ErrnoException).code !== 'EPIPE') {
+        throw error;
+      }
+    }
   }
 
   /**

@@ -124,6 +124,22 @@ ctx chat
 | `/provider <name>` | Switch LLM provider |
 | `/exit` | Exit the chat session |
 
+#### TUI Mode
+
+On TTY terminals, `ctx chat` launches in **TUI mode** by default — a three-region terminal layout with independent scrolling:
+
+| Region | Description |
+|--------|-------------|
+| **Chat area** | Scrollable message history and streaming LLM responses |
+| **Status bar** | Mode indicator, context gauge, session cost, current activity |
+| **Input area** | readline-powered input with tab completion |
+
+Use `--no-tui` to fall back to the classic readline REPL (also used automatically when stdout is not a TTY, e.g., piping):
+
+```bash
+ctx chat --no-tui
+```
+
 ### `ctx config`
 
 Manage configuration settings.
