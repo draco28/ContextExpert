@@ -74,6 +74,7 @@ export class InputManager {
   private pendingPrompt: boolean = false;
   private onLineHandler: (line: string) => Promise<void> | void;
   private isProcessing: boolean = false;
+  private _closed: boolean = false;
 
   constructor(options: InputManagerOptions) {
     this.regionManager = options.regionManager;
@@ -261,6 +262,7 @@ export class InputManager {
    * Closes the underlying readline interface.
    */
   close(): void {
+    this._closed = true;
     this.rl.close();
   }
 
@@ -268,7 +270,7 @@ export class InputManager {
    * Check if the readline interface is closed.
    */
   get closed(): boolean {
-    return (this.rl as any).closed ?? false;
+    return this._closed;
   }
 }
 

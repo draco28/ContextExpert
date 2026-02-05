@@ -179,14 +179,16 @@ describe('StatusLineRenderer', () => {
 
   describe('indexing status', () => {
     it('should show indexing progress when active', () => {
-      renderer.update({
+      // Use a wide renderer so the indexing segment isn't truncated
+      const wideRenderer = new StatusLineRenderer({}, { terminalWidth: 120 });
+      wideRenderer.update({
         indexingStatus: {
           projectName: 'my-project',
           progress: 45,
           stage: 'Embedding',
         },
       });
-      const stripped = stripAnsi(renderer.render());
+      const stripped = stripAnsi(wideRenderer.render());
 
       expect(stripped).toContain('Indexing my-project');
       expect(stripped).toContain('45%');

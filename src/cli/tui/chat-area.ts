@@ -13,6 +13,13 @@
 
 import chalk from 'chalk';
 import type { TerminalRegionManager } from './terminal-regions.js';
+
+/**
+ * Pattern matching ANSI escape sequences: CSI, DEC save/restore, and OSC.
+ * Used to strip raw sequences from untrusted content (e.g. LLM output)
+ * before rendering, preventing terminal injection attacks.
+ */
+const ANSI_ESCAPE_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b[78]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 import type {
   DisplayMessage,
   MessageRole,
@@ -331,10 +338,11 @@ export class ChatAreaManager {
    * consider using `marked` + `marked-terminal` for full support.
    */
   private renderMarkdown(content: string): string {
-    // For now, just apply basic formatting
-    // TODO: Integrate marked-terminal for full markdown support
+    // Strip raw ANSI escape sequences from LLM output to prevent terminal injection
+    // (cursor manipulation, screen clearing, color corruption)
+    const sanitized = content.replace(ANSI_ESCAPE_PATTERN, '');
 
-    return content
+    return sanitized
       // Bold: **text** or __text__
       .replace(/\*\*(.+?)\*\*/g, chalk.bold('$1'))
       .replace(/__(.+?)__/g, chalk.bold('$1'))

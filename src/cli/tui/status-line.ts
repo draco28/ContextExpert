@@ -22,6 +22,9 @@ import {
   type StatusLineState,
 } from './types.js';
 
+/** Pattern matching ANSI escape sequences (CSI, DEC save/restore, OSC). */
+const ANSI_ESCAPE_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b[78]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
 /**
  * Default status line state.
  * Provides sensible defaults for initialization.
@@ -356,22 +359,17 @@ export class StatusLineRenderer {
 
   /**
    * Truncate string to fit terminal width.
-   * Preserves ANSI codes but truncates visible characters.
-   *
-   * Note: This is a simplified implementation.
-   * For production, use strip-ansi + slice-ansi for proper handling.
+   * Strips ANSI codes to measure visible width, then truncates plain text
+   * on overflow (status bar is rebuilt every render cycle, so losing
+   * colors on overflow is acceptable).
    */
   private truncate(str: string): string {
-    // Simple approach: just limit total length
-    // ANSI codes add ~10-20 chars that aren't visible
-    const maxLength = this.terminalWidth + 50; // Buffer for ANSI codes
-
-    if (str.length <= maxLength) {
+    const visible = str.replace(ANSI_ESCAPE_PATTERN, '');
+    if (visible.length <= this.terminalWidth) {
       return str;
     }
-
-    // Truncate and add ellipsis
-    return str.slice(0, maxLength - 1) + chalk.dim('…');
+    // Strip ANSI and truncate plain text to avoid cutting mid-escape
+    return visible.slice(0, this.terminalWidth - 1) + '…';
   }
 }
 

@@ -2061,7 +2061,18 @@ async function handleQuestionTUI(
 
   // Adapt the stream to TUI StreamChunk format
   const tuiStream = adaptStreamForTUI(stream);
-  const responseContent = await tui.streamResponse(tuiStream);
+
+  let responseContent: string;
+  try {
+    responseContent = await tui.streamResponse(tuiStream);
+  } catch (error) {
+    // TUI state (cursor, streaming flag, input) already cleaned up by
+    // controller.streamResponse()'s finally block — just handle UX here
+    const message = error instanceof Error ? error.message : String(error);
+    tui.addInfoMessage(chalk.red(`Response failed: ${message}`));
+    ctx.debug(`Stream error details: ${error}`);
+    return;
+  }
 
   // Show citations if we have sources
   if (sources.length > 0) {

@@ -21,6 +21,9 @@
 import { EventEmitter } from 'node:events';
 import type { RegionBounds } from './types.js';
 
+/** Pattern matching ANSI escape sequences (CSI, DEC save/restore, OSC). */
+const ANSI_ESCAPE_PATTERN = /\x1b\[[0-9;]*[a-zA-Z]|\x1b[78]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
 /**
  * ANSI escape sequence constants.
  * Using named constants makes the code more readable and maintainable.
@@ -220,6 +223,13 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
     if (this.rows !== oldRows || this.cols !== oldCols) {
       this.computeRegions();
       this.applyScrollRegion();
+
+      // If streaming, reposition cursor to end of new chat region —
+      // the old cursor position may now be outside the updated region
+      if (this._isStreaming) {
+        this.write(ANSI.cursorTo(this.chatRegion.endRow));
+      }
+
       this.emit('resize', { rows: this.rows, cols: this.cols });
     }
   }
@@ -438,12 +448,10 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
    */
   private truncateToWidth(str: string, maxWidth?: number): string {
     const width = maxWidth ?? this.cols;
-
-    // Simple truncation - doesn't account for ANSI codes
-    // For proper handling, use strip-ansi and slice-ansi packages
-    // TODO: Improve with ANSI-aware truncation
-    if (str.length <= width) return str;
-    return str.slice(0, width - 1) + '…';
+    const visible = str.replace(ANSI_ESCAPE_PATTERN, '');
+    if (visible.length <= width) return str;
+    // Strip ANSI and truncate plain text (status bar is rebuilt every render)
+    return visible.slice(0, width - 1) + '…';
   }
 }
 
