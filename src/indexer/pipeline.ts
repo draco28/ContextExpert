@@ -65,6 +65,9 @@ export interface IndexPipelineOptions {
    */
   embeddingBatchSize?: number;
 
+  /** Additional ignore patterns (gitignore syntax), merged with .gitignore and defaults */
+  additionalIgnorePatterns?: string[];
+
   /**
    * Use staging table pattern for atomic re-indexing.
    *
@@ -205,6 +208,7 @@ export async function runIndexPipeline(
 
   try {
     scanResult = await scanDirectory(projectPath, {
+      additionalIgnorePatterns: options.additionalIgnorePatterns,
       onFile: (file: FileInfo) => {
         filesScanned++;
         onProgress?.('scanning', filesScanned, 0, file.relativePath);

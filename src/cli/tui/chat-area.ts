@@ -99,11 +99,12 @@ export class ChatAreaManager {
    * Add an info message (system notifications, hints, etc.)
    *
    * @param content - The info text
+   * @param options - Display options (compact: reduce vertical spacing)
    */
-  addInfoMessage(content: string): void {
+  addInfoMessage(content: string, options?: { compact?: boolean }): void {
     const message = this.createMessage('info', content);
     this.messages.push(message);
-    this.displayMessage(message);
+    this.displayMessage(message, options);
   }
 
   /**
@@ -261,8 +262,14 @@ export class ChatAreaManager {
 
   /**
    * Display a complete message to the chat area.
+   *
+   * @param message - The message to display
+   * @param options - Display options (compact: use single newline instead of double)
    */
-  private displayMessage(message: DisplayMessage): void {
+  private displayMessage(
+    message: DisplayMessage,
+    options?: { compact?: boolean }
+  ): void {
     this.ensureNewline();
 
     const style = ROLE_STYLES[message.role];
@@ -285,9 +292,10 @@ export class ChatAreaManager {
       display = `${chalk.dim(time)} ${display}`;
     }
 
-    // Write to chat area
-    this.write(display);
-    this.write('\n\n');
+    // Single write call: avoids extra scroll trigger from separate write('\n\n').
+    // Compact mode uses '\n' for tighter spacing (e.g. indexing stage messages).
+    const trailing = options?.compact ? '\n' : '\n\n';
+    this.write(display + trailing);
     this.needsNewline = false;
   }
 

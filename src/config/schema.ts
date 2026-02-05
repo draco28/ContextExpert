@@ -73,6 +73,17 @@ export const LLMConfigSchema = z.object({
 });
 
 /**
+ * Indexing configuration
+ * Controls file discovery behavior during indexing
+ */
+export const IndexingConfigSchema = z.object({
+  ignore_patterns: z
+    .array(z.string())
+    .optional()
+    .describe('Additional gitignore-style patterns to ignore during indexing'),
+});
+
+/**
  * Root configuration schema
  * This is the complete shape of config.toml
  */
@@ -85,6 +96,8 @@ export const ConfigSchema = z.object({
   llm: LLMConfigSchema.optional(),
   /** Optional RAG pipeline configuration */
   rag: RAGConfigSchema.optional(),
+  /** Optional indexing configuration */
+  indexing: IndexingConfigSchema.optional(),
 });
 
 /**

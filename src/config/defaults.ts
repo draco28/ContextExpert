@@ -36,6 +36,11 @@ export const DEFAULT_CONFIG: Config = {
     top_k: 10,      // Return top 10 results
     rerank: true,   // Reranking improves relevance significantly
   },
+
+  // Indexing settings - no extra ignores by default
+  indexing: {
+    ignore_patterns: [],
+  },
 };
 
 /**
@@ -65,4 +70,10 @@ timeout_ms = ${DEFAULT_CONFIG.embedding.timeout_ms}  # 2 minutes (allows for mod
 [search]
 top_k = ${DEFAULT_CONFIG.search.top_k}
 rerank = ${DEFAULT_CONFIG.search.rerank}
+
+# Indexing Settings
+# Additional gitignore-style patterns to exclude from indexing
+# These are merged with .gitignore and built-in defaults
+[indexing]
+# ignore_patterns = ["*.tmp", "scratch/", "experiments/"]
 `;

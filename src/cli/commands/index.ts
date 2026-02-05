@@ -41,6 +41,7 @@ interface IndexCommandOptions {
   name?: string;
   tags?: string;
   force?: boolean;
+  ignore?: string;
 }
 
 /**
@@ -58,6 +59,7 @@ export function createIndexCommand(
     .option('-n, --name <name>', 'Project name (defaults to directory name)')
     .option('-t, --tags <tags>', 'Comma-separated tags for organization')
     .option('--force', 'Re-index even if project already exists', false)
+    .option('--ignore <patterns>', 'Comma-separated gitignore-style patterns to exclude')
     .action(async (path: string, cmdOptions: IndexCommandOptions) => {
       const ctx = getContext();
 
@@ -112,6 +114,16 @@ export function createIndexCommand(
       const config = loadConfig() ?? DEFAULT_CONFIG;
       ctx.debug(`Embedding provider: ${config.embedding.provider}`);
       ctx.debug(`Embedding model: ${config.embedding.model}`);
+
+      // Parse ignore patterns from CLI flag and config, then merge
+      const cliIgnorePatterns = cmdOptions.ignore
+        ? cmdOptions.ignore.split(',').map(p => p.trim()).filter(Boolean)
+        : [];
+      const configIgnorePatterns = config.indexing?.ignore_patterns ?? [];
+      const additionalIgnorePatterns = [...cliIgnorePatterns, ...configIgnorePatterns];
+      if (additionalIgnorePatterns.length > 0) {
+        ctx.debug(`Ignore patterns: ${additionalIgnorePatterns.join(', ')}`);
+      }
 
       // Create progress reporter
       const reporter = createProgressReporter({
@@ -176,6 +188,8 @@ export function createIndexCommand(
           embeddingDimensions,
           embeddingTimeout: config.embedding.timeout_ms,
           useStaging, // Atomic re-indexing: use staging table pattern
+          additionalIgnorePatterns: additionalIgnorePatterns.length > 0
+            ? additionalIgnorePatterns : undefined,
           chunkerConfig: {
             embeddingProvider, // For SemanticChunker on docs
           },

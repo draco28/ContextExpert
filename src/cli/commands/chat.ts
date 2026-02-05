@@ -615,6 +615,7 @@ async function handleIndexCommand(
           embeddingModel,
           embeddingDimensions,
           embeddingTimeout: state.config.embedding.timeout_ms,
+          additionalIgnorePatterns: state.config.indexing?.ignore_patterns,
           chunkerConfig: { embeddingProvider },
           useStaging: !!existingProject && force,
           // Balanced batch size: good throughput + enough yield points
@@ -625,28 +626,40 @@ async function handleIndexCommand(
         statusBarOptions: undefined,
         readline: undefined,
 
-        // Progress → status bar + stage messages in chat area
+        // Progress → prompt area (always visible) + stage messages in chat area
         onProgress: (() => {
           let lastUpdateTime = 0;
+          const stageLabels: Record<string, string> = {
+            scanning: 'Scanning files...',
+            chunking: 'Chunking files...',
+            embedding: 'Embedding chunks...',
+            storing: 'Storing data...',
+          };
+          const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
           return (data: { stage: string; processed: number; total: number; projectName: string }) => {
-            // Detect stage transitions → show milestone in chat area
+            // Detect stage transitions → show compact milestone in chat area
             if (data.stage !== currentStage) {
               currentStage = data.stage;
-              const labels: Record<string, string> = {
-                scanning: 'Scanning files...',
-                chunking: 'Chunking files...',
-                embedding: 'Embedding chunks...',
-                storing: 'Storing data...',
-              };
-              ctx.log(chalk.dim(labels[data.stage] ?? data.stage));
+              state.tui!.addInfoMessage(
+                chalk.dim(stageLabels[data.stage] ?? data.stage),
+                { compact: true }
+              );
             }
 
-            // Throttle status bar updates to 200ms to avoid excessive ANSI writes
+            // Throttle prompt + status bar updates to 200ms
             const now = performance.now();
             if (now - lastUpdateTime >= 200) {
               lastUpdateTime = now;
               const percent = data.total > 0
                 ? Math.round((data.processed / data.total) * 100) : 0;
+
+              // Show progress in prompt (always visible, never truncated)
+              state.tui!.setPrompt(
+                chalk.dim(`📦 ${capitalize(data.stage)} ${percent}% (Ctrl+C to cancel) `)
+              );
+              state.tui!.prompt();
+
+              // Also update status bar (visible if not truncated)
               state.tui!.setIndexingStatus({
                 projectName: data.projectName,
                 progress: percent,
@@ -751,6 +764,7 @@ async function handleIndexCommand(
         embeddingModel,
         embeddingDimensions,
         embeddingTimeout: state.config.embedding.timeout_ms,
+        additionalIgnorePatterns: state.config.indexing?.ignore_patterns,
         chunkerConfig: { embeddingProvider },
         // Small batch size for background: frequent event-loop yields
         // keep readline responsive during embedding

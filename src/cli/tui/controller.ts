@@ -345,10 +345,13 @@ export class TUIController {
 
   /**
    * Add an info message to the chat area.
+   *
+   * @param content - The info text
+   * @param options - Display options (compact: reduce vertical spacing)
    */
-  addInfoMessage(content: string): void {
+  addInfoMessage(content: string, options?: { compact?: boolean }): void {
     this.inputManager.pause();
-    this.chatArea.addInfoMessage(content);
+    this.chatArea.addInfoMessage(content, options);
     this.inputManager.resume();
   }
 
