@@ -45,6 +45,8 @@ interface AskCommandOptions {
   project?: string;
   /** Number of context chunks to retrieve (default: 5, max: 20) */
   topK: string;
+  /** Return retrieved context without LLM generation */
+  contextOnly?: boolean;
 }
 
 /**
@@ -67,6 +69,23 @@ interface AskOutputJSON {
     };
     model: string;
     provider: string;
+  };
+}
+
+/**
+ * JSON output format for --context-only mode.
+ * Returns RAG context without LLM generation.
+ */
+interface AskContextOnlyJSON {
+  question: string;
+  context: string;
+  estimatedTokens: number;
+  sources: CitationJSON[];
+  metadata: {
+    projectSearched: string;
+    retrievalMs: number;
+    assemblyMs: number;
+    totalMs: number;
   };
 }
 
@@ -323,6 +342,7 @@ export function createAskCommand(getContext: () => CommandContext): Command {
       'Number of context chunks to retrieve',
       String(DEFAULT_TOP_K)
     )
+    .option('--context-only', 'Return retrieved context without LLM generation')
     .action(async (question: string, cmdOptions: AskCommandOptions) => {
       const ctx = getContext();
       const startTime = performance.now();
@@ -403,6 +423,46 @@ export function createAskCommand(getContext: () => CommandContext): Command {
           );
         } else {
           displayNoResults(ctx, trimmedQuestion);
+        }
+        return;
+      }
+
+      // ─────────────────────────────────────────────────────────────────────
+      // 5b. Context-only mode: return context without LLM generation
+      // ─────────────────────────────────────────────────────────────────────
+      if (cmdOptions.contextOnly) {
+        const totalMs = performance.now() - startTime;
+        ctx.debug(`Context-only mode: skipping LLM generation`);
+
+        if (ctx.options.json) {
+          const output: AskContextOnlyJSON = {
+            question: trimmedQuestion,
+            context: ragResult.content,
+            estimatedTokens: ragResult.estimatedTokens,
+            sources: formatCitationsJSON(ragResult.sources).citations,
+            metadata: {
+              projectSearched: project.name,
+              retrievalMs: ragResult.metadata.retrievalMs,
+              assemblyMs: ragResult.metadata.assemblyMs,
+              totalMs,
+            },
+          };
+          console.log(JSON.stringify(output, null, 2));
+        } else {
+          ctx.log(chalk.bold('Context:'));
+          ctx.log(ragResult.content);
+          ctx.log('');
+          ctx.log(chalk.bold('Sources:'));
+          ctx.log(formatCitations(ragResult.sources, { style: 'compact' }));
+
+          if (ctx.options.verbose) {
+            ctx.log('');
+            ctx.log(chalk.dim('─'.repeat(50)));
+            ctx.log(chalk.dim(`Retrieval: ${ragResult.metadata.retrievalMs.toFixed(0)}ms`));
+            ctx.log(chalk.dim(`Assembly: ${ragResult.metadata.assemblyMs.toFixed(0)}ms`));
+            ctx.log(chalk.dim(`Total: ${totalMs.toFixed(0)}ms`));
+            ctx.log(chalk.dim(`Estimated tokens: ${ragResult.estimatedTokens}`));
+          }
         }
         return;
       }

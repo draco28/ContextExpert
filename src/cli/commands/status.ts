@@ -14,6 +14,9 @@ import { getDb, runMigrations, getDbPath } from '../../database/index.js';
 import { loadConfig, getConfigPath } from '../../config/loader.js';
 import { DatabaseError } from '../../errors/index.js';
 
+// Version injected at build time via tsup define
+const VERSION = process.env.CLI_VERSION ?? '0.0.0';
+
 /**
  * Statistics returned from the database
  */
@@ -122,6 +125,9 @@ export function createStatusCommand(
       // Handle JSON output
       if (ctx.options.json) {
         const jsonOutput = {
+          version: VERSION,
+          nodeVersion: process.version,
+          platform: process.platform,
           projects: dbStats.projectCount,
           totalChunks: dbStats.totalChunks,
           database: {
@@ -148,7 +154,7 @@ export function createStatusCommand(
       // Build formatted output
       const lines: string[] = [];
 
-      lines.push(chalk.bold('Context Expert Status'));
+      lines.push(chalk.bold(`Context Expert Status`) + chalk.dim(` v${VERSION}`));
       lines.push(chalk.dim('─'.repeat(35)));
 
       // Core statistics

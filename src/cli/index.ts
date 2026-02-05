@@ -16,6 +16,7 @@ import { createListCommand } from './commands/list.js';
 import { createRemoveCommand } from './commands/remove.js';
 import { createSearchCommand } from './commands/search.js';
 import { createStatusCommand } from './commands/status.js';
+import { createCheckCommand } from './commands/check.js';
 import {
   handleError,
   createGlobalErrorHandler,
@@ -132,6 +133,9 @@ program.addCommand(createConfigCommand(() => createContext(getGlobalOptions())))
 
 // Status command - show storage statistics and system health
 program.addCommand(createStatusCommand(() => createContext(getGlobalOptions())));
+
+// Check command - project health check for agents
+program.addCommand(createCheckCommand(() => createContext(getGlobalOptions())));
 
 // ============================================================================
 // ERROR HANDLING & EXECUTION

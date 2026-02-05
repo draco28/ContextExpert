@@ -120,6 +120,9 @@ describe('createListCommand', () => {
         file_count: 150,
         chunk_count: 500,
         config: null,
+        embedding_model: 'BAAI/bge-large-en-v1.5',
+        embedding_dimensions: 1024,
+        description: 'Frontend React application',
       },
       {
         id: 'uuid-2',
@@ -132,6 +135,9 @@ describe('createListCommand', () => {
         file_count: 75,
         chunk_count: 200,
         config: null,
+        embedding_model: null,
+        embedding_dimensions: 1024,
+        description: null,
       },
     ];
 
@@ -209,6 +215,27 @@ describe('createListCommand', () => {
 
       // Second project has no tags (null in DB)
       expect(jsonOutput.projects[1].tags).toEqual([]);
+    });
+
+    it('includes embedding metadata in JSON output', async () => {
+      mockContext.options.json = true;
+      const cmd = createListCommand(() => mockContext);
+
+      const program = new Command();
+      program.addCommand(cmd);
+      await program.parseAsync(['node', 'test', 'list']);
+
+      const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+
+      // First project has embedding info
+      expect(jsonOutput.projects[0].embeddingModel).toBe('BAAI/bge-large-en-v1.5');
+      expect(jsonOutput.projects[0].embeddingDimensions).toBe(1024);
+      expect(jsonOutput.projects[0].description).toBe('Frontend React application');
+
+      // Second project has null embedding model
+      expect(jsonOutput.projects[1].embeddingModel).toBeNull();
+      expect(jsonOutput.projects[1].embeddingDimensions).toBe(1024);
+      expect(jsonOutput.projects[1].description).toBeNull();
     });
 
     it('queries database with correct SQL', async () => {

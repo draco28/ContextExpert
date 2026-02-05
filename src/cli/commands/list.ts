@@ -80,7 +80,7 @@ function getProjects(): Project[] {
     // Query all projects, sorted by most recently updated
     const projects = db
       .prepare(
-        `SELECT id, name, path, tags, ignore_patterns, indexed_at, updated_at, file_count, chunk_count, config
+        `SELECT id, name, path, tags, ignore_patterns, indexed_at, updated_at, file_count, chunk_count, config, embedding_model, embedding_dimensions, description
          FROM projects
          ORDER BY COALESCE(updated_at, indexed_at, datetime('now')) DESC`
       )
@@ -124,6 +124,9 @@ export function createListCommand(
             chunkCount: p.chunk_count,
             indexedAt: p.indexed_at,
             updatedAt: p.updated_at,
+            embeddingModel: p.embedding_model,
+            embeddingDimensions: p.embedding_dimensions,
+            description: p.description,
           })),
         };
         console.log(JSON.stringify(jsonOutput, null, 2));

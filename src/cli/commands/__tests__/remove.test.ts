@@ -268,15 +268,27 @@ describe('createRemoveCommand', () => {
       mockContext.options.json = true;
     });
 
-    it('skips confirmation in JSON mode', async () => {
+    it('requires --force in JSON mode', async () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const cmd = createRemoveCommand(() => mockContext);
       const program = new Command();
       program.addCommand(cmd);
 
-      // Note: No --force flag, but JSON mode should proceed
+      // No --force flag - should NOT delete
       await program.parseAsync(['node', 'test', 'remove', 'test-project']);
 
-      expect(mockDbOps.deleteProject).toHaveBeenCalled();
+      expect(mockDbOps.deleteProject).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(1);
+
+      // Should output structured JSON error to stderr
+      expect(consoleErrorSpy).toHaveBeenCalled();
+      const errorOutput = JSON.parse(consoleErrorSpy.mock.calls[0][0]);
+      expect(errorOutput.error).toBe('confirmation_required');
+      expect(errorOutput.action).toBe('remove');
+      expect(errorOutput.project.name).toBe('test-project');
+      expect(errorOutput.hint).toContain('--force');
+
+      consoleErrorSpy.mockRestore();
     });
 
     it('outputs valid JSON', async () => {

@@ -305,6 +305,20 @@ describe('createStatusCommand', () => {
       expect(jsonOutput.config).toBeDefined();
       expect(jsonOutput.config.path).toBe('/Users/test/.ctx/config.toml');
     });
+
+    it('includes version, nodeVersion, and platform', async () => {
+      const cmd = createStatusCommand(() => mockContext);
+
+      const program = new Command();
+      program.addCommand(cmd);
+      await program.parseAsync(['node', 'test', 'status']);
+
+      const jsonOutput = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(jsonOutput.version).toBeDefined();
+      expect(typeof jsonOutput.version).toBe('string');
+      expect(jsonOutput.nodeVersion).toBe(process.version);
+      expect(jsonOutput.platform).toBe(process.platform);
+    });
   });
 
   describe('file size formatting', () => {

@@ -240,6 +240,12 @@ describe('createAskCommand', () => {
       expect(topKOption?.short).toBe('-k');
       expect(topKOption?.defaultValue).toBe('5');
     });
+
+    it('has --context-only option', () => {
+      const command = createAskCommand(() => mockContext);
+      const contextOnlyOption = command.options.find((o) => o.long === '--context-only');
+      expect(contextOnlyOption).toBeDefined();
+    });
   });
 
   describe('question validation', () => {
@@ -524,6 +530,69 @@ describe('createAskCommand', () => {
       await expect(runCommand(['How does auth work?'])).rejects.toThrow(
         'No projects indexed'
       );
+    });
+  });
+
+  describe('--context-only mode', () => {
+    it('returns context without calling LLM in JSON mode', async () => {
+      mockContext.options.json = true;
+      await runCommand(['How does auth work?', '--context-only']);
+
+      // LLM should NOT be created or called
+      expect(llmProvider.createLLMProvider).not.toHaveBeenCalled();
+      expect(mockLLMProvider.chat).not.toHaveBeenCalled();
+      expect(mockLLMProvider.streamChat).not.toHaveBeenCalled();
+
+      // Should output JSON
+      expect(consoleLogSpy).toHaveBeenCalled();
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+
+      expect(output.question).toBe('How does auth work?');
+      expect(output.context).toBe(mockRAGResult.content);
+      expect(output.estimatedTokens).toBe(500);
+      expect(Array.isArray(output.sources)).toBe(true);
+      expect(output.sources).toHaveLength(2);
+    });
+
+    it('includes metadata in JSON context-only output', async () => {
+      mockContext.options.json = true;
+      await runCommand(['How does auth work?', '--context-only']);
+
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(output.metadata).toBeDefined();
+      expect(output.metadata.projectSearched).toBe('test-project');
+      expect(output.metadata.retrievalMs).toBe(150);
+      expect(output.metadata.assemblyMs).toBe(25);
+      expect(typeof output.metadata.totalMs).toBe('number');
+      // Should NOT have generationMs
+      expect(output.metadata.generationMs).toBeUndefined();
+    });
+
+    it('prints XML context in text mode', async () => {
+      await runCommand(['How does auth work?', '--context-only']);
+
+      // LLM should NOT be created
+      expect(llmProvider.createLLMProvider).not.toHaveBeenCalled();
+
+      // Should print context and sources
+      expect(logOutput.some((line) => line.includes('Context'))).toBe(true);
+      expect(logOutput.some((line) => line.includes('Sources'))).toBe(true);
+    });
+
+    it('handles empty results with --context-only', async () => {
+      mockRAGEngine.search.mockResolvedValue({
+        ...mockRAGResult,
+        sources: [],
+        content: '',
+      });
+
+      mockContext.options.json = true;
+      await runCommand(['How does auth work?', '--context-only']);
+
+      // Empty results should still work (no LLM call)
+      const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
+      expect(output.answer).toBeNull();
+      expect(output.sources).toEqual([]);
     });
   });
 

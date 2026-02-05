@@ -79,14 +79,28 @@ export function createRemoveCommand(
 
       ctx.debug(`Found project: ${project.id} at ${project.path}`);
 
-      // Confirmation check (unless --force or --json mode)
-      if (!options.force && !ctx.options.json) {
-        ctx.log(chalk.yellow(`This will permanently delete "${name}" and all indexed data.`));
-        ctx.log(`  - ${chalk.dim('Path:')} ${project.path}`);
-        ctx.log(`  - ${chalk.dim('Chunks:')} ${project.chunk_count.toLocaleString()}`);
-        ctx.log(`  - ${chalk.dim('Files indexed:')} ${project.file_count.toLocaleString()}`);
-        ctx.log('');
-        ctx.log(`Run with ${chalk.cyan('--force')} to confirm deletion.`);
+      // Confirmation check (always requires --force)
+      if (!options.force) {
+        if (ctx.options.json) {
+          console.error(JSON.stringify({
+            error: "confirmation_required",
+            action: "remove",
+            project: {
+              name: project.name,
+              path: project.path,
+              chunkCount: project.chunk_count,
+              fileCount: project.file_count,
+            },
+            hint: "Use --force to confirm deletion",
+          }));
+        } else {
+          ctx.log(chalk.yellow(`This will permanently delete "${name}" and all indexed data.`));
+          ctx.log(`  - ${chalk.dim('Path:')} ${project.path}`);
+          ctx.log(`  - ${chalk.dim('Chunks:')} ${project.chunk_count.toLocaleString()}`);
+          ctx.log(`  - ${chalk.dim('Files indexed:')} ${project.file_count.toLocaleString()}`);
+          ctx.log('');
+          ctx.log(`Run with ${chalk.cyan('--force')} to confirm deletion.`);
+        }
         process.exitCode = 1;
         return;
       }
