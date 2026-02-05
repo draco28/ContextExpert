@@ -102,6 +102,7 @@ ctx ask "Explain the caching strategy" --top-k 15 --json
 |--------|-------------|
 | `--project, -p` | Limit context to specific project |
 | `--top-k, -k` | Number of chunks to retrieve (default: 5) |
+| `--context-only` | Return retrieved context without LLM generation |
 | `--json` | Output structured JSON response |
 
 ### `ctx chat`
@@ -160,18 +161,29 @@ ctx status
 
 Displays database size, total chunks, project count, and embedding model info.
 
-### `ctx remove <name>`
+### `ctx check <project>`
 
-Delete an indexed project and all its data.
+Pre-flight health check for a project's index readiness.
 
 ```bash
-ctx remove old-project          # Shows confirmation prompt
-ctx remove old-project --force  # Skip confirmation
+ctx check backend-api
+ctx check backend-api --json
+```
+
+Checks that the project exists, has indexed chunks, the source path is on disk, and the embedding model matches current config. Returns `ready: true/false` in JSON mode. Exit code `1` when not ready.
+
+### `ctx remove <name>`
+
+Delete an indexed project and all its data. Requires `--force` to confirm.
+
+```bash
+ctx remove old-project --force
+ctx remove old-project --force --json
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--force, -f` | Skip confirmation prompt |
+| `--force, -f` | Confirm deletion (required) |
 
 ## Configuration
 
@@ -287,6 +299,10 @@ src/
 ```
 
 For architecture details, see [SPEC.md](./SPEC.md).
+
+## Agent Integration
+
+All commands support `--json` for structured output, making Context Expert a first-class tool for AI agents (Claude Code, Codex, OpenCode, etc.). See the [Agent Integration Guide](./docs/agent-integration.md) for JSON response schemas, recommended workflows, and error handling.
 
 ## Contributing
 
