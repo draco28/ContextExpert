@@ -306,6 +306,51 @@ describe('TUIController', () => {
     });
   });
 
+  describe('pre-start safety (Bug 5)', () => {
+    it('should not crash when setProject called before start', () => {
+      // tui is constructed but start() not called
+      expect(() => tui.setProject('my-project')).not.toThrow();
+    });
+
+    it('should not crash when addUserMessage called before start', () => {
+      expect(() => tui.addUserMessage('hello')).not.toThrow();
+    });
+
+    it('should not crash when addInfoMessage called before start', () => {
+      expect(() => tui.addInfoMessage('info')).not.toThrow();
+    });
+
+    it('should not crash when addSystemMessage called before start', () => {
+      expect(() => tui.addSystemMessage('system')).not.toThrow();
+    });
+
+    it('should return empty string when streamResponse called before start', async () => {
+      const stream = makeStream([{ type: 'text', content: 'test' }]);
+      const result = await tui.streamResponse(stream);
+      expect(result).toBe('');
+    });
+
+    it('should not crash when prompt called before start', () => {
+      expect(() => tui.prompt()).not.toThrow();
+    });
+  });
+
+  describe('shutdown error handling (Bug 6)', () => {
+    it('should still cleanup regions if inputManager.close throws', async () => {
+      tui.start();
+
+      const inputManager = tui.getInputManager();
+      (inputManager.close as ReturnType<typeof vi.fn>).mockImplementation(() => {
+        throw new Error('close failed');
+      });
+
+      const regionManager = tui.getRegionManager();
+
+      expect(() => tui.shutdown()).not.toThrow();
+      expect(regionManager.cleanup).toHaveBeenCalled();
+    });
+  });
+
   describe('message methods', () => {
     beforeEach(() => {
       tui.start();

@@ -164,6 +164,61 @@ describe('TerminalRegionManager', () => {
     });
   });
 
+  describe('resize during streaming', () => {
+    it('should write newline after cursorTo when streaming', () => {
+      regionManager.initialize();
+
+      // Start streaming
+      regionManager.beginChatStream();
+      mockStdout.clear();
+
+      // Trigger resize
+      mockStdout.rows = 30;
+      mockStdout.emit('resize');
+
+      const output = mockStdout.getOutput();
+
+      // Should contain cursorTo for the new chat end row (30 - 2 = 28)
+      expect(output).toContain(ANSI.cursorTo(28));
+      // Should contain a newline to scroll within the region
+      expect(output).toContain('\n');
+    });
+  });
+
+  describe('dimension clamping', () => {
+    it('should clamp getDimensions rows to minimum for tiny terminals', () => {
+      mockStdout.rows = 2;
+      regionManager = new TerminalRegionManager({
+        stdout: mockStdout as any,
+        statusBarHeight: 1,
+        inputAreaHeight: 1,
+        useSynchronizedOutput: false,
+      });
+      regionManager.initialize();
+
+      const dims = regionManager.getDimensions();
+
+      // Should be clamped to 3 (MIN_TERMINAL_ROWS), not raw 2
+      expect(dims.rows).toBe(3);
+    });
+
+    it('should produce valid regions for tiny terminals', () => {
+      mockStdout.rows = 1;
+      regionManager = new TerminalRegionManager({
+        stdout: mockStdout as any,
+        statusBarHeight: 1,
+        inputAreaHeight: 1,
+        useSynchronizedOutput: false,
+      });
+      regionManager.initialize();
+
+      const regions = regionManager.getRegions();
+
+      // chatEnd should never be less than chatStart
+      expect(regions.chat.endRow).toBeGreaterThanOrEqual(regions.chat.startRow);
+    });
+  });
+
   describe('isTTY', () => {
     it('should return true for TTY stream', () => {
       regionManager.initialize();

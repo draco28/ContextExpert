@@ -179,7 +179,8 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
    * Update terminal dimensions from stdout.
    */
   private updateDimensions(): void {
-    this.rows = this.stdout.rows || 24;   // || catches both null/undefined and 0
+    // Clamp rows to minimum to prevent negative region bounds everywhere
+    this.rows = Math.max(this.stdout.rows || 24, MIN_TERMINAL_ROWS);
     this.cols = this.stdout.columns || 80;
   }
 
@@ -187,11 +188,8 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
    * Compute region bounds based on current terminal size.
    */
   private computeRegions(): void {
-    // Clamp rows to minimum to prevent negative region bounds
-    const rows = Math.max(this.rows, MIN_TERMINAL_ROWS);
-
-    // Input area is at the very bottom
-    const inputEnd = rows;
+    // Input area is at the very bottom (rows already clamped by updateDimensions)
+    const inputEnd = this.rows;
     const inputStart = inputEnd - this.inputAreaHeight + 1;
 
     // Status bar is just above input
@@ -232,9 +230,11 @@ export class TerminalRegionManager extends EventEmitter<TerminalRegionManagerEve
         this.applyScrollRegion();
 
         // If streaming, reposition cursor to end of new chat region —
-        // the old cursor position may now be outside the updated region
+        // the old cursor position may now be outside the updated region.
+        // The '\n' triggers a scroll within the DECSTBM region (same as beginChatStream).
         if (this._isStreaming) {
           this.write(ANSI.cursorTo(this.chatRegion.endRow));
+          this.write('\n');
         }
 
         this.emit('resize', { rows: this.rows, cols: this.cols });

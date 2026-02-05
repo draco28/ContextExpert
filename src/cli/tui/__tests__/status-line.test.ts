@@ -177,6 +177,51 @@ describe('StatusLineRenderer', () => {
     });
   });
 
+  describe('segment-level truncation (Bug 4)', () => {
+    it('should drop rightmost segments when overflowing', () => {
+      // Very narrow terminal — force overflow
+      const narrow = new StatusLineRenderer(
+        {
+          project: 'my-long-project-name',
+          gitBranch: 'feature/very-long-branch-name',
+          phase: AgentPhase.TOOL_USE,
+          activity: { tool: 'read_file', description: 'Reading a very long file path' },
+        },
+        { terminalWidth: 40 }
+      );
+
+      const output = narrow.render();
+      const stripped = stripAnsi(output);
+
+      // Mode indicator (leftmost, highest priority) should always be present
+      expect(stripped).toContain('[PLAN]');
+
+      // Output should not exceed terminal width
+      expect(stripped.length).toBeLessThanOrEqual(40);
+    });
+
+    it('should preserve mode indicator when segments are dropped', () => {
+      const narrow = new StatusLineRenderer(
+        {
+          project: 'my-long-project-name',
+          phase: AgentPhase.TOOL_USE,
+          activity: { tool: 'read_file', description: 'Reading very long file path' },
+          indexingStatus: { projectName: 'proj', progress: 50, stage: 'Embedding' },
+        },
+        { terminalWidth: 40 }
+      );
+
+      const output = narrow.render();
+      const stripped = stripAnsi(output);
+
+      // Mode indicator should be preserved (first segment, highest priority)
+      expect(stripped).toContain('[PLAN]');
+
+      // Activity or indexing (rightmost segments) should be dropped
+      expect(stripped).not.toContain('Reading very long file path');
+    });
+  });
+
   describe('indexing status', () => {
     it('should show indexing progress when active', () => {
       // Use a wide renderer so the indexing segment isn't truncated

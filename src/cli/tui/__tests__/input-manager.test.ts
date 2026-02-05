@@ -226,6 +226,92 @@ describe('InputManager', () => {
     });
   });
 
+  describe('onBusy callback', () => {
+    it('should call onBusy when input is rejected during processing', async () => {
+      const onBusy = vi.fn();
+      let resolveHandler: () => void;
+      const handlerComplete = new Promise<void>((resolve) => {
+        resolveHandler = resolve;
+      });
+
+      onLine.mockImplementationOnce(async () => {
+        await handlerComplete;
+      });
+
+      const im = new InputManager({
+        regionManager,
+        onLine,
+        onBusy,
+        input: createMockInput(),
+        output: createMockOutput(),
+      });
+
+      const rl = im.getReadlineInterface();
+
+      // Start processing first line
+      rl.emit('line', 'first');
+      // Wait for isProcessing to be set
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Second line should trigger onBusy
+      rl.emit('line', 'second');
+      expect(onBusy).toHaveBeenCalledWith('second');
+
+      resolveHandler!();
+      await new Promise((r) => setTimeout(r, 10));
+      im.close();
+    });
+  });
+
+  describe('onError callback', () => {
+    it('should call onError when line handler throws', async () => {
+      const onError = vi.fn();
+      const testError = new Error('handler failed');
+
+      onLine.mockRejectedValueOnce(testError);
+
+      const im = new InputManager({
+        regionManager,
+        onLine,
+        onError,
+        input: createMockInput(),
+        output: createMockOutput(),
+      });
+
+      const rl = im.getReadlineInterface();
+      rl.emit('line', 'trigger error');
+
+      // Wait for async handler to complete
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(onError).toHaveBeenCalledWith(testError);
+      im.close();
+    });
+
+    it('should fall back to console.error when no onError provided', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const testError = new Error('handler failed');
+
+      onLine.mockRejectedValueOnce(testError);
+
+      const im = new InputManager({
+        regionManager,
+        onLine,
+        input: createMockInput(),
+        output: createMockOutput(),
+      });
+
+      const rl = im.getReadlineInterface();
+      rl.emit('line', 'trigger error');
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(consoleSpy).toHaveBeenCalledWith('Input handler error:', testError);
+      consoleSpy.mockRestore();
+      im.close();
+    });
+  });
+
   describe('SIGINT handler', () => {
     it('should call custom SIGINT handler', () => {
       const sigintHandler = vi.fn();

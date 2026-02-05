@@ -187,10 +187,16 @@ export class StatusLineRenderer {
       parts.push(indexingPart);
     }
 
-    const fullLine = parts.join(this.separator);
+    // Progressive truncation: drop rightmost (least important) segments
+    // until the line fits, preserving chalk colors on remaining segments.
+    let line = parts.join(this.separator);
+    while (parts.length > 1 && this.visibleLength(line) > this.terminalWidth) {
+      parts.pop();
+      line = parts.join(this.separator);
+    }
 
-    // Truncate if needed
-    return this.truncate(fullLine);
+    // Final character-level truncation only if a single segment overflows
+    return this.truncate(line);
   }
 
   /**
@@ -358,10 +364,17 @@ export class StatusLineRenderer {
   }
 
   /**
+   * Measure visible width of a string, excluding ANSI escape sequences.
+   */
+  private visibleLength(str: string): number {
+    return str.replace(ANSI_ESCAPE_PATTERN, '').length;
+  }
+
+  /**
    * Truncate string to fit terminal width.
    * Strips ANSI codes to measure visible width, then truncates plain text
-   * on overflow (status bar is rebuilt every render cycle, so losing
-   * colors on overflow is acceptable).
+   * on overflow. Only used as a last resort when even a single segment
+   * overflows — segment-level truncation in render() handles the common case.
    */
   private truncate(str: string): string {
     const visible = str.replace(ANSI_ESCAPE_PATTERN, '');

@@ -235,6 +235,17 @@ export class TUIController {
           this.closeHandler();
         }
       },
+      onBusy: () => {
+        this.chatArea.addInfoMessage(
+          chalk.yellow('Processing previous input...'), { compact: true }
+        );
+      },
+      onError: (error) => {
+        this.chatArea.addInfoMessage(
+          chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`),
+          { compact: true }
+        );
+      },
     });
 
     // Render initial status bar
@@ -319,6 +330,7 @@ export class TUIController {
    */
   setProject(project: string | null): void {
     this.updateStatus({ project });
+    if (!this.isRunning) return;
 
     // Update prompt to reflect project
     const prompt = InputManager.createProjectPrompt(project);
@@ -338,6 +350,7 @@ export class TUIController {
    * Add a user message to the chat area.
    */
   addUserMessage(content: string): void {
+    if (!this.isRunning) return;
     this.inputManager.pause();
     this.chatArea.addUserMessage(content);
     this.inputManager.resume();
@@ -350,6 +363,7 @@ export class TUIController {
    * @param options - Display options (compact: reduce vertical spacing)
    */
   addInfoMessage(content: string, options?: { compact?: boolean }): void {
+    if (!this.isRunning) return;
     this.inputManager.pause();
     this.chatArea.addInfoMessage(content, options);
     this.inputManager.resume();
@@ -359,6 +373,7 @@ export class TUIController {
    * Add a system message to the chat area.
    */
   addSystemMessage(content: string): void {
+    if (!this.isRunning) return;
     this.inputManager.pause();
     this.chatArea.addSystemMessage(content);
     this.inputManager.resume();
@@ -372,6 +387,7 @@ export class TUIController {
    * @returns The complete response text
    */
   async streamResponse(stream: AsyncIterable<StreamChunk>): Promise<string> {
+    if (!this.isRunning) return '';
     this.inputManager.pause();
     this.setActivity(AgentPhase.THINKING);
 
@@ -450,6 +466,7 @@ export class TUIController {
    * Clear the chat area.
    */
   clearChat(): void {
+    if (!this.isRunning) return;
     this.inputManager.pause();
     this.chatArea.clear();
     this.inputManager.resume();
@@ -459,6 +476,7 @@ export class TUIController {
    * Show the prompt.
    */
   prompt(): void {
+    if (!this.isRunning) return;
     this.inputManager.prompt();
   }
 
@@ -466,6 +484,7 @@ export class TUIController {
    * Set the prompt text.
    */
   setPrompt(prompt: string): void {
+    if (!this.isRunning) return;
     this.inputManager.setPrompt(prompt);
   }
 
@@ -500,13 +519,21 @@ export class TUIController {
 
     this.isRunning = false;
 
-    // Close input manager
-    if (this.inputManager) {
-      this.inputManager.close();
+    // Close input manager — don't let errors prevent terminal cleanup
+    try {
+      if (this.inputManager) {
+        this.inputManager.close();
+      }
+    } catch {
+      // Input manager cleanup failed — continue with terminal reset
     }
 
-    // Cleanup terminal regions
-    this.regionManager.cleanup();
+    // Always cleanup terminal regions (reset scroll, exit alt screen)
+    try {
+      this.regionManager.cleanup();
+    } catch {
+      // Terminal cleanup failed — nothing more we can do
+    }
 
     // Print session summary
     console.log(''); // Newline after cleanup

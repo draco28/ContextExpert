@@ -35,6 +35,10 @@ export interface InputManagerOptions {
   onSIGINT?: () => void;
   /** Handler for close event */
   onClose?: () => void;
+  /** Called when input is rejected during processing. Used for user feedback. */
+  onBusy?: (line: string) => void;
+  /** Called when the line handler throws an error. Defaults to console.error. */
+  onError?: (error: unknown) => void;
   /** Terminal region manager for cursor coordination */
   regionManager: TerminalRegionManager;
   /** Initial prompt string */
@@ -102,8 +106,9 @@ export class InputManager {
     // We use 'line' event instead of async iterator to prevent
     // readline from closing during async operations
     this.rl.on('line', async (line) => {
-      // Prevent concurrent processing
+      // Prevent concurrent processing — notify caller if input is rejected
       if (this.isProcessing) {
+        if (options.onBusy) options.onBusy(line);
         return;
       }
 
@@ -112,8 +117,11 @@ export class InputManager {
       try {
         await this.onLineHandler(line);
       } catch (error) {
-        // Let the caller handle errors - just log for debugging
-        console.error('Input handler error:', error);
+        if (options.onError) {
+          options.onError(error);
+        } else {
+          console.error('Input handler error:', error);
+        }
       } finally {
         this.isProcessing = false;
 
