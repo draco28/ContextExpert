@@ -134,7 +134,7 @@ export class RerankerService {
     // Build lookup for O(1) access to original results
     const resultLookup = new Map(candidates.map((r) => [r.id, r]));
 
-    return reranked.map((r) => {
+    const mapped = reranked.map((r) => {
       const original = resultLookup.get(r.id);
       if (!original) {
         // This should never happen, but TypeScript requires the check
@@ -142,9 +142,15 @@ export class RerankerService {
       }
       return {
         ...original,
-        score: r.score, // Update with reranker's relevance score
+        score: r.score, // Raw reranker score (sigmoid of cross-encoder logit)
       };
     });
+
+    // Min-max normalize scores so they spread meaningfully across 0-1.
+    // BGE reranker sigmoid outputs cluster tightly (e.g., all ~0.73),
+    // making raw scores uninformative. Normalization preserves ordering
+    // while giving users visible score differentiation.
+    return normalizeScores(mapped);
   }
 
   /**
@@ -164,4 +170,43 @@ export class RerankerService {
   getCandidateCount(): number {
     return this.config.candidateCount;
   }
+}
+
+/**
+ * Normalize scores to a meaningful 0-1 range.
+ *
+ * The BGE cross-encoder reranker applies sigmoid to its logits, but
+ * Transformers.js may already apply sigmoid internally (double-sigmoid),
+ * compressing all scores to bitwise-identical floats (~0.73). When scores
+ * have sufficient spread, min-max normalization is used. When scores are
+ * too compressed (range < epsilon), rank-based scoring is used instead —
+ * the reranker's ordering is still meaningful even when absolute scores aren't.
+ */
+function normalizeScores(
+  results: SearchResultWithContext[]
+): SearchResultWithContext[] {
+  if (results.length <= 1) {
+    return results;
+  }
+
+  const scores = results.map((r) => r.score);
+  const minScore = Math.min(...scores);
+  const maxScore = Math.max(...scores);
+  const range = maxScore - minScore;
+
+  const EPSILON = 1e-6;
+  if (range < EPSILON) {
+    // Double-sigmoid compressed scores to be effectively identical.
+    // Fall back to rank-based scoring: top result = 1.0, bottom = 0.5.
+    const n = results.length;
+    return results.map((r, i) => ({
+      ...r,
+      score: 1 - (i / (n - 1)) * 0.5,
+    }));
+  }
+
+  return results.map((r) => ({
+    ...r,
+    score: (r.score - minScore) / range,
+  }));
 }

@@ -205,17 +205,19 @@ const MAX_CONTEXT_TOKENS = 8000;
 
 /**
  * System prompt template for the chat assistant.
- * Context is injected dynamically based on current project focus.
+ * RAG context is injected alongside each user message, not in the system prompt,
+ * to keep it close to the question and avoid "lost in the middle" effects.
  */
-const SYSTEM_PROMPT_BASE = `You are an expert code assistant helping developers understand their codebase.
+const SYSTEM_PROMPT_BASE = `You are an expert code assistant. The user has indexed their codebase and you help them understand it.
 
 ## Your Role
-- Answer questions accurately using the provided context (if any)
-- If no context is provided, you can still have general conversations
-- If context doesn't contain enough information, say so clearly
+- A RAG search is performed automatically on every question — retrieved code context is provided in a "## Retrieved Context" section alongside each question
+- Answer questions accurately using this retrieved context
+- If the retrieved context doesn't contain relevant information for the question, acknowledge this and suggest the user rephrase their question to help the search find better results
+- NEVER tell the user to paste files or share code manually — the system searches automatically
 - Remember the conversation history for multi-turn discussions
 
-## Citation Requirements (when context is provided)
+## Citation Requirements (when Retrieved Context is provided)
 - Reference sources using [1], [2], etc. when citing specific code
 - Only cite sources that directly support your answer
 
@@ -1291,17 +1293,11 @@ export function parseREPLCommand(
 }
 
 /**
- * Build the complete system prompt with optional RAG context.
+ * Build the system prompt (static — RAG context is now placed adjacent
+ * to the user's question to prevent "lost in the middle" effects).
  */
-function buildSystemPrompt(ragContext?: string): string {
-  if (!ragContext) {
-    return SYSTEM_PROMPT_BASE;
-  }
-
-  return `${SYSTEM_PROMPT_BASE}
-
-## Context
-${ragContext}`;
+function buildSystemPrompt(): string {
+  return SYSTEM_PROMPT_BASE;
 }
 
 /**
@@ -1637,13 +1633,19 @@ async function handleQuestion(
   // 2. Build messages for LLM
   // Combine file reference context (explicit @file) with RAG context (search results)
   const combinedContext = [fileReferenceContext, ragContext].filter(Boolean).join('\n\n');
-  const systemPrompt = buildSystemPrompt(combinedContext || undefined);
+  const systemPrompt = buildSystemPrompt();
   const conversationMessages = state.conversationContext.getMessages();
+
+  // Place RAG context adjacent to the user's question (not in system prompt)
+  // so the LLM always sees context near the question regardless of conversation length
+  const userMessage = combinedContext
+    ? `## Retrieved Context\n${combinedContext}\n\n## Question\n${question}`
+    : question;
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     ...conversationMessages,
-    { role: 'user', content: question },
+    { role: 'user', content: userMessage },
   ];
 
   // 3. Stream response (with explicit error handling)
@@ -2040,15 +2042,21 @@ async function handleQuestionTUI(
     }
   }
 
-  // Build messages with context (matching handleQuestion pattern from chat.ts)
+  // Build messages with context (matching handleQuestion pattern)
   const combinedContext = [fileReferenceContext, ragContext].filter(Boolean).join('\n\n');
-  const systemPrompt = buildSystemPrompt(combinedContext || undefined);
+  const systemPrompt = buildSystemPrompt();
   const conversationMessages = state.conversationContext.getMessages();
+
+  // Place RAG context adjacent to the user's question (not in system prompt)
+  // so the LLM always sees context near the question regardless of conversation length
+  const userMessage = combinedContext
+    ? `## Retrieved Context\n${combinedContext}\n\n## Question\n${question}`
+    : question;
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },
     ...conversationMessages,
-    { role: 'user', content: question },
+    { role: 'user', content: userMessage },
   ];
 
   // Stream the LLM response through the TUI
