@@ -83,6 +83,12 @@ import {
   AgentPhase,
   type StreamChunk as TUIStreamChunk,
 } from '../tui/index.js';
+import type { LLMProvider } from '@contextaisdk/core';
+import { ChatAgent } from '../../agent/chat-agent.js';
+import {
+  renderAgentEventsREPL,
+  adaptAgentEventsForTUI,
+} from '../utils/agent-event-renderer.js';
 
 // ============================================================================
 // Types
@@ -146,6 +152,12 @@ export interface ChatState {
   routingEngine?: RoutingRAGEngine | null;
   /** TUI controller when in TUI mode (null/undefined for classic REPL) */
   tui?: TUIController;
+  /** Full LLM provider instance (not narrowed) for agent use */
+  fullProvider?: LLMProvider;
+  /** ReAct chat agent (null if creation failed — falls back to legacy path) */
+  chatAgent?: ChatAgent;
+  /** AbortController for cancelling in-flight agent work (Ctrl+C support) */
+  agentAbortController?: AbortController;
 }
 
 /**
@@ -925,6 +937,9 @@ const REPL_COMMANDS: REPLCommand[] = [
         state.ragEngine = newRagEngine;
         updatePrompt(state);
 
+        // Update ChatAgent with new project context
+        state.chatAgent?.updateProject(project, state.allProjects, state.routingEngine);
+
         ctx.log(chalk.blue(`Focused on: ${project.name}`));
         if (!existsSync(project.path)) {
           ctx.log(
@@ -974,6 +989,9 @@ const REPL_COMMANDS: REPLCommand[] = [
         state.currentProject = null;
         state.ragEngine = null;
         updatePrompt(state);
+
+        // Update ChatAgent to reflect unfocused state
+        state.chatAgent?.updateProject(null, state.allProjects, state.routingEngine);
       } else {
         ctx.log(chalk.dim('No project is currently focused'));
       }
@@ -1098,6 +1116,7 @@ const REPL_COMMANDS: REPLCommand[] = [
     description: 'Clear conversation history',
     handler: async (_args, state, ctx) => {
       state.conversationContext.clear();
+      state.chatAgent?.clearHistory();
       ctx.log(chalk.blue('Conversation history cleared'));
       return true;
     },
@@ -1348,6 +1367,137 @@ async function streamResponse(
 
   return { content: chunks.join(''), usage };
 }
+
+// ============================================================================
+// Agent-Based Question Handlers
+// ============================================================================
+
+/**
+ * Handle a user question via the ReAct ChatAgent (REPL mode).
+ *
+ * The agent autonomously decides whether to search the knowledge base.
+ * Streams the response token-by-token with tool activity indicators.
+ */
+async function handleQuestionWithAgent(
+  question: string,
+  state: ChatState,
+  ctx: CommandContext
+): Promise<void> {
+  if (!state.chatAgent) return;
+
+  // Handle @file references (pre-processing, not an agent tool)
+  let fileReferenceContext = '';
+  const filePatterns = parseFileReferences(question);
+
+  if (filePatterns.length > 0 && state.currentProject) {
+    const resolvedReferences = resolveFileReferences(state.currentProject.id, filePatterns);
+    fileReferenceContext = formatReferencesAsContext(resolvedReferences);
+    const summary = getReferenceSummary(resolvedReferences);
+    const hasMatches = resolvedReferences.some((r) => r.matches.length > 0);
+
+    if (hasMatches) {
+      ctx.log(chalk.cyan('Using: ') + chalk.dim(summary));
+    } else {
+      ctx.log(chalk.yellow('No files found matching: ') + filePatterns.join(', '));
+    }
+    question = stripFileReferences(question);
+  } else if (filePatterns.length > 0 && !state.currentProject) {
+    ctx.log(
+      chalk.yellow('@file references require a focused project. Use /focus <project> first.')
+    );
+  }
+
+  // Stream agent events to REPL (with abort signal for Ctrl+C)
+  state.agentAbortController = new AbortController();
+  ctx.log('');
+  const events = state.chatAgent.streamQuestion(question, {
+    fileReferenceContext: fileReferenceContext || undefined,
+    signal: state.agentAbortController.signal,
+  });
+  const { content } = await renderAgentEventsREPL(events, ctx);
+  state.agentAbortController = undefined;
+
+  ctx.log('');
+
+  // Update the legacy conversation context too (for /share export compatibility)
+  if (content) {
+    state.conversationContext.addMessage({ role: 'user', content: question });
+    state.conversationContext.addMessage({ role: 'assistant', content });
+    await state.conversationContext.truncate();
+  }
+}
+
+/**
+ * Handle a user question via the ReAct ChatAgent (TUI mode).
+ *
+ * Same as REPL version but routes events through the TUI adapter
+ * for status bar phase management and scrollable chat area.
+ */
+async function handleQuestionTUIWithAgent(
+  question: string,
+  state: ChatState,
+  _ctx: CommandContext,
+  tui: TUIController
+): Promise<void> {
+  if (!state.chatAgent) return;
+
+  // Handle @file references
+  let fileReferenceContext = '';
+  const filePatterns = parseFileReferences(question);
+
+  if (filePatterns.length > 0 && state.currentProject) {
+    const resolvedReferences = resolveFileReferences(state.currentProject.id, filePatterns);
+    fileReferenceContext = formatReferencesAsContext(resolvedReferences);
+    const summary = getReferenceSummary(resolvedReferences);
+    const hasMatches = resolvedReferences.some((r) => r.matches.length > 0);
+
+    if (hasMatches) {
+      tui.addInfoMessage(chalk.cyan('Using: ') + chalk.dim(summary));
+    } else {
+      tui.addInfoMessage(chalk.yellow('No files found matching: ') + filePatterns.join(', '));
+    }
+    question = stripFileReferences(question);
+  } else if (filePatterns.length > 0 && !state.currentProject) {
+    tui.addInfoMessage(
+      chalk.yellow('@file references require a focused project. Use /focus <project> first.')
+    );
+  }
+
+  // Stream agent events through TUI adapter (with abort signal for Ctrl+C)
+  state.agentAbortController = new AbortController();
+  const events = state.chatAgent.streamQuestion(question, {
+    fileReferenceContext: fileReferenceContext || undefined,
+    signal: state.agentAbortController.signal,
+  });
+  const { stream: tuiStream, getSources } = adaptAgentEventsForTUI(events, tui);
+
+  try {
+    const responseContent = await tui.streamResponse(tuiStream);
+    state.agentAbortController = undefined;
+
+    // Show citations if we have sources (same as legacy TUI path)
+    const sources = getSources();
+    if (sources.length > 0) {
+      tui.addInfoMessage(formatCitations(sources));
+    }
+
+    // Update legacy conversation context for /share compatibility
+    if (responseContent) {
+      state.conversationContext.addMessage({ role: 'user', content: question });
+      state.conversationContext.addMessage({ role: 'assistant', content: responseContent });
+      await state.conversationContext.truncate();
+    }
+  } catch (error) {
+    state.agentAbortController = undefined;
+    tui.addInfoMessage(
+      chalk.red(`Response failed: ${error instanceof Error ? error.message : String(error)}`)
+    );
+  }
+}
+
+// ============================================================================
+// Legacy Question Handlers (fallback when ChatAgent is unavailable)
+// ============================================================================
 
 /**
  * Handle a user question: Smart routing + RAG search + LLM generation.
@@ -1904,9 +2054,14 @@ async function runChatTUI(
 
       try {
         // Set status to thinking
-        tui.setActivity(AgentPhase.THINKING, undefined, 'Searching...');
+        tui.setActivity(AgentPhase.THINKING, undefined, 'Thinking...');
 
-        await handleQuestionTUI(input, state, tuiCtx, tui);
+        // Route through ChatAgent if available
+        if (state.chatAgent) {
+          await handleQuestionTUIWithAgent(input, state, tuiCtx, tui);
+        } else {
+          await handleQuestionTUI(input, state, tuiCtx, tui);
+        }
       } catch (error) {
         if (error instanceof CLIError) {
           tuiCtx.error(error.message);
@@ -2197,9 +2352,13 @@ async function runChatREPL(
         return;
       }
 
-      // Handle as question
+      // Handle as question — route through ChatAgent if available
       try {
-        await handleQuestion(input, state, ctx);
+        if (state.chatAgent) {
+          await handleQuestionWithAgent(input, state, ctx);
+        } else {
+          await handleQuestion(input, state, ctx);
+        }
       } catch (error) {
         if (error instanceof CLIError) {
           ctx.error(error.message);
@@ -2214,13 +2373,23 @@ async function runChatREPL(
       rl.prompt();
     });
 
-    // Handle Ctrl+C gracefully
-    // First Ctrl+C cancels background indexing if running
-    // Second Ctrl+C (or first if no indexing) exits chat
+    // Handle Ctrl+C gracefully — 3-tier cancellation:
+    // 1. If agent is processing → cancel agent, return to prompt
+    // 2. If background indexing is running → cancel indexing
+    // 3. Nothing running → exit chat
     rl.on('SIGINT', () => {
+      // Tier 1: Cancel in-flight agent work
+      if (state.agentAbortController) {
+        state.agentAbortController.abort();
+        state.agentAbortController = undefined;
+        process.stdout.write('\n');
+        rl.prompt();
+        return;
+      }
+
       const coordinator = getBackgroundIndexingCoordinator();
 
-      // If indexing is running, first Ctrl+C cancels it
+      // Tier 2: Cancel background indexing
       if (coordinator.isRunning()) {
         coordinator.cancel();
         ctx.log('');
@@ -2317,6 +2486,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       ctx.debug('Creating LLM provider...');
 
       let provider: ChatState['llmProvider'];
+      let fullLLMProvider: LLMProvider | undefined;
       let providerName: string;
       let model: string;
 
@@ -2330,6 +2500,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
             storedProvider.config
           );
           provider = result.provider;
+          fullLLMProvider = result.provider;
           providerName = result.displayName;
           model = result.model;
         } catch (error) {
@@ -2345,6 +2516,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
             },
           });
           provider = result.provider;
+          fullLLMProvider = result.provider;
           providerName = result.name;
           model = result.model;
         }
@@ -2358,6 +2530,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
           },
         });
         provider = result.provider;
+        fullLLMProvider = result.provider;
         providerName = result.name;
         model = result.model;
       }
@@ -2437,6 +2610,29 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       // ─────────────────────────────────────────────────────────────────────
       // 6. Build state and start REPL
       // ─────────────────────────────────────────────────────────────────────
+      // ─────────────────────────────────────────────────────────────────────
+      // 5c. Create ChatAgent (ReAct agent with streaming)
+      // ─────────────────────────────────────────────────────────────────────
+      let chatAgent: ChatAgent | undefined;
+      try {
+        if (!fullLLMProvider) {
+          throw new Error('Full LLM provider not available');
+        }
+        chatAgent = new ChatAgent({
+          llmProvider: fullLLMProvider,
+          routingEngine,
+          allProjects,
+          currentProject,
+          maxContextTokens: MAX_CONTEXT_TOKENS,
+          maxIterations: 5,
+        });
+        ctx.debug('ChatAgent created successfully (ReAct agent enabled)');
+      } catch (error) {
+        ctx.debug(
+          `Failed to create ChatAgent, using legacy RAG path: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+
       const state: ChatState = {
         currentProject,
         conversationContext,
@@ -2447,6 +2643,8 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         queryRouter,
         allProjects,
         routingEngine,
+        fullProvider: fullLLMProvider,
+        chatAgent,
       };
 
       // TUI is default on TTY; --no-tui falls back to classic readline REPL

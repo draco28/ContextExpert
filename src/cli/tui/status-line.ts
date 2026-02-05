@@ -420,6 +420,7 @@ export function toolToDescription(tool: string, args?: Record<string, unknown>):
     },
     glob: (a) => `Finding ${a?.pattern ?? 'files'}`,
     grep: (a) => `Searching for "${a?.pattern ?? 'pattern'}"`,
+    retrieve_knowledge: (a) => `Searching: "${String(a?.query ?? 'codebase').slice(0, 40)}"`,
   };
 
   const descriptor = descriptions[tool];
