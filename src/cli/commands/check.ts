@@ -15,7 +15,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { existsSync, statSync, readdirSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CommandContext } from '../types.js';
 import { getDb, runMigrations, type Project } from '../../database/index.js';

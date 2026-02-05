@@ -398,6 +398,48 @@ export function createAskCommand(getContext: () => CommandContext): Command {
       ctx.debug(`Retrieved ${ragResult.sources.length} sources`);
       ctx.debug(`Context tokens: ~${ragResult.estimatedTokens}`);
 
+      // ─────────────────────────────────────────────────────────────────────
+      // 5b. Context-only mode: return context without LLM generation
+      // ─────────────────────────────────────────────────────────────────────
+      if (cmdOptions.contextOnly) {
+        const totalMs = performance.now() - startTime;
+        ctx.debug(`Context-only mode: skipping LLM generation`);
+
+        if (ctx.options.json) {
+          const output: AskContextOnlyJSON = {
+            question: trimmedQuestion,
+            context: ragResult.content,
+            estimatedTokens: ragResult.estimatedTokens,
+            sources: formatCitationsJSON(ragResult.sources).citations,
+            metadata: {
+              projectSearched: project.name,
+              retrievalMs: ragResult.metadata.retrievalMs,
+              assemblyMs: ragResult.metadata.assemblyMs,
+              totalMs,
+            },
+          };
+          console.log(JSON.stringify(output, null, 2));
+        } else if (ragResult.sources.length === 0) {
+          displayNoResults(ctx, trimmedQuestion);
+        } else {
+          ctx.log(chalk.bold('Context:'));
+          ctx.log(ragResult.content);
+          ctx.log('');
+          ctx.log(chalk.bold('Sources:'));
+          ctx.log(formatCitations(ragResult.sources, { style: 'compact' }));
+
+          if (ctx.options.verbose) {
+            ctx.log('');
+            ctx.log(chalk.dim('─'.repeat(50)));
+            ctx.log(chalk.dim(`Retrieval: ${ragResult.metadata.retrievalMs.toFixed(0)}ms`));
+            ctx.log(chalk.dim(`Assembly: ${ragResult.metadata.assemblyMs.toFixed(0)}ms`));
+            ctx.log(chalk.dim(`Total: ${totalMs.toFixed(0)}ms`));
+            ctx.log(chalk.dim(`Estimated tokens: ${ragResult.estimatedTokens}`));
+          }
+        }
+        return;
+      }
+
       // Check if we got any results
       if (ragResult.sources.length === 0) {
         if (ctx.options.json) {
@@ -423,46 +465,6 @@ export function createAskCommand(getContext: () => CommandContext): Command {
           );
         } else {
           displayNoResults(ctx, trimmedQuestion);
-        }
-        return;
-      }
-
-      // ─────────────────────────────────────────────────────────────────────
-      // 5b. Context-only mode: return context without LLM generation
-      // ─────────────────────────────────────────────────────────────────────
-      if (cmdOptions.contextOnly) {
-        const totalMs = performance.now() - startTime;
-        ctx.debug(`Context-only mode: skipping LLM generation`);
-
-        if (ctx.options.json) {
-          const output: AskContextOnlyJSON = {
-            question: trimmedQuestion,
-            context: ragResult.content,
-            estimatedTokens: ragResult.estimatedTokens,
-            sources: formatCitationsJSON(ragResult.sources).citations,
-            metadata: {
-              projectSearched: project.name,
-              retrievalMs: ragResult.metadata.retrievalMs,
-              assemblyMs: ragResult.metadata.assemblyMs,
-              totalMs,
-            },
-          };
-          console.log(JSON.stringify(output, null, 2));
-        } else {
-          ctx.log(chalk.bold('Context:'));
-          ctx.log(ragResult.content);
-          ctx.log('');
-          ctx.log(chalk.bold('Sources:'));
-          ctx.log(formatCitations(ragResult.sources, { style: 'compact' }));
-
-          if (ctx.options.verbose) {
-            ctx.log('');
-            ctx.log(chalk.dim('─'.repeat(50)));
-            ctx.log(chalk.dim(`Retrieval: ${ragResult.metadata.retrievalMs.toFixed(0)}ms`));
-            ctx.log(chalk.dim(`Assembly: ${ragResult.metadata.assemblyMs.toFixed(0)}ms`));
-            ctx.log(chalk.dim(`Total: ${totalMs.toFixed(0)}ms`));
-            ctx.log(chalk.dim(`Estimated tokens: ${ragResult.estimatedTokens}`));
-          }
         }
         return;
       }

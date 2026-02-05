@@ -579,7 +579,7 @@ describe('createAskCommand', () => {
       expect(logOutput.some((line) => line.includes('Sources'))).toBe(true);
     });
 
-    it('handles empty results with --context-only', async () => {
+    it('handles empty results with --context-only in JSON mode', async () => {
       mockRAGEngine.search.mockResolvedValue({
         ...mockRAGResult,
         sources: [],
@@ -589,10 +589,28 @@ describe('createAskCommand', () => {
       mockContext.options.json = true;
       await runCommand(['How does auth work?', '--context-only']);
 
-      // Empty results should still work (no LLM call)
+      // Should use AskContextOnlyJSON format, not AskOutputJSON
+      expect(llmProvider.createLLMProvider).not.toHaveBeenCalled();
       const output = JSON.parse(consoleLogSpy.mock.calls[0][0]);
-      expect(output.answer).toBeNull();
+      expect(output.context).toBe('');
+      expect(output.estimatedTokens).toBeDefined();
       expect(output.sources).toEqual([]);
+      // Should NOT have answer/generationMs/model fields
+      expect(output.answer).toBeUndefined();
+      expect(output.metadata.generationMs).toBeUndefined();
+    });
+
+    it('handles empty results with --context-only in text mode', async () => {
+      mockRAGEngine.search.mockResolvedValue({
+        ...mockRAGResult,
+        sources: [],
+        content: '',
+      });
+
+      await runCommand(['How does auth work?', '--context-only']);
+
+      expect(llmProvider.createLLMProvider).not.toHaveBeenCalled();
+      expect(logOutput.some((line) => line.includes('No relevant context'))).toBe(true);
     });
   });
 
