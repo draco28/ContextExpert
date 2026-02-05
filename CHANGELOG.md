@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-02-06
+
+### Added
+
+- **TUI Chat Mode** - Full terminal UI for `ctx chat` with DECSTBM scroll regions, fixed status bar, and streaming cursor rendering
+- **`ctx check` Command** - Pre-flight validation for agent integration workflows
+- **`--context-only` Flag** - Retrieve RAG context from `ctx ask` without LLM cost
+- **`--ignore` Flag** - Custom ignore patterns via CLI flag and `config.toml` setting
+- **Background Indexing** - Real-time progress display with blocking input and status line updates
+- **Agent Integration Guide** - Documentation for using ctx as a tool from AI agents (`docs/agent-integration.md`)
+- `.env` support for local development testing
+
+### Fixed
+
+- LLM ignoring RAG context in multi-turn conversations
+- Empty results handling in `ctx ask --context-only`
+- Indexer cancellation bugs and test failures
+- Event loop yields to prevent UI freeze during indexing
+- Throttled indexing progress updates to prevent input lag
+- Provider fallback model access TypeScript error
+
+### Changed
+
+- Skip SemanticChunker and reduce batch size for background indexing (performance)
+- Remove CLAUDE.md and AGENTS.md from version control
+
+## [1.0.2] - 2026-02-03
+
+### Fixed
+
+- Inject CLI version from `package.json` at build time via tsup define
+
+## [1.0.1] - 2026-02-03
+
+### Fixed
+
+- Address code review feedback for atomic re-indexing (staging table cleanup, error handling)
+
+## [1.0.0] - 2026-02-03
+
+### Added
+
+#### Multi-Project Search
+- **MultiProjectVectorStoreManager** - Cross-project vector search
+- **MultiProjectBM25StoreManager** - Cross-project BM25 keyword search
+- **MultiProjectFusionService** - Hybrid search combining vector + BM25 results
+- **projectId Metadata** - Chunk attribution for cross-project result tracking
+- Description column added to projects schema
+
+#### Smart Query Routing
+- **RoutingRAGEngine** - Unified routing + search engine
+- Automatic query classification for multi-project search
+- Project attribution preserved after reranking
+
+#### Chat Enhancements
+- `/index` REPL command for in-session indexing
+- `/index status` command for indexing progress
+- Tab completion, `@file` references, and `/share` export
+- Improved empty-database UX messaging
+
+#### Indexer
+- **Atomic Re-indexing** - Staging table pattern for safe index rebuilds
+
+### Fixed
+
+- Replaced fragile `for-await` readline with event-based pattern
+- TypeScript errors breaking CI
+- Project attribution lost after reranking
+- Query routing type errors and false positive classification
+
 ## [0.1.0] - 2026-02-01
 
 ### Added
@@ -43,5 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No incremental reranking** - Full rerank on each query
 - **Memory usage** - Large codebases may require significant RAM during indexing
 
-[unreleased]: https://github.com/draco28/ContextExpert/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/draco28/ContextExpert/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/draco28/ContextExpert/compare/v1.0.2...v1.1.0
+[1.0.2]: https://github.com/draco28/ContextExpert/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/draco28/ContextExpert/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/draco28/ContextExpert/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/draco28/ContextExpert/releases/tag/v0.1.0
