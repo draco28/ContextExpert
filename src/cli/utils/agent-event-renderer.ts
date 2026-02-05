@@ -32,6 +32,7 @@
 import chalk from 'chalk';
 import type { ChatAgentEvent } from '../../agent/chat-agent.js';
 import type { RAGSource } from '../../agent/types.js';
+import type { RetrieveKnowledgeOutput } from '../../agent/tools/index.js';
 import { formatCitations } from '../../agent/citations.js';
 import type { CommandContext } from '../types.js';
 import {
@@ -140,7 +141,7 @@ export async function renderAgentEventsREPL(
       case 'tool_result': {
         // ReActLoop unwraps ToolResult.data, so event.result is the
         // RetrieveKnowledgeOutput directly (no .data wrapper)
-        const resultData = event.result as { sourceCount?: number; sources?: RAGSource[]; searchTimeMs?: number } | undefined;
+        const resultData = event.result as RetrieveKnowledgeOutput | undefined;
         const sourceCount = resultData?.sourceCount ?? 0;
         const timeMs = Math.round(event.durationMs);
 
@@ -263,7 +264,7 @@ export function adaptAgentEventsForTUI(
         case 'tool_result': {
           // ReActLoop unwraps ToolResult.data, so event.result is the
           // RetrieveKnowledgeOutput directly (no .data wrapper)
-          const resultData = event.result as { sourceCount?: number } | undefined;
+          const resultData = event.result as RetrieveKnowledgeOutput | undefined;
           const sourceCount = resultData?.sourceCount ?? 0;
           const timeMs = Math.round(event.durationMs);
           tui.addInfoMessage(

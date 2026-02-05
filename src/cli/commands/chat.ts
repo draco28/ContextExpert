@@ -1383,7 +1383,10 @@ async function handleQuestionWithAgent(
   state: ChatState,
   ctx: CommandContext
 ): Promise<void> {
-  if (!state.chatAgent) return;
+  if (!state.chatAgent) {
+    ctx.warn('Agent unavailable, skipping.');
+    return;
+  }
 
   // Handle @file references (pre-processing, not an agent tool)
   let fileReferenceContext = '';
@@ -1410,20 +1413,23 @@ async function handleQuestionWithAgent(
   // Stream agent events to REPL (with abort signal for Ctrl+C)
   state.agentAbortController = new AbortController();
   ctx.log('');
-  const events = state.chatAgent.streamQuestion(question, {
-    fileReferenceContext: fileReferenceContext || undefined,
-    signal: state.agentAbortController.signal,
-  });
-  const { content } = await renderAgentEventsREPL(events, ctx);
-  state.agentAbortController = undefined;
+  try {
+    const events = state.chatAgent.streamQuestion(question, {
+      fileReferenceContext: fileReferenceContext || undefined,
+      signal: state.agentAbortController.signal,
+    });
+    const { content } = await renderAgentEventsREPL(events, ctx);
 
-  ctx.log('');
+    ctx.log('');
 
-  // Update the legacy conversation context too (for /share export compatibility)
-  if (content) {
-    state.conversationContext.addMessage({ role: 'user', content: question });
-    state.conversationContext.addMessage({ role: 'assistant', content });
-    await state.conversationContext.truncate();
+    // Update the legacy conversation context too (for /share export compatibility)
+    if (content) {
+      state.conversationContext.addMessage({ role: 'user', content: question });
+      state.conversationContext.addMessage({ role: 'assistant', content });
+      await state.conversationContext.truncate();
+    }
+  } finally {
+    state.agentAbortController = undefined;
   }
 }
 
@@ -1439,7 +1445,10 @@ async function handleQuestionTUIWithAgent(
   _ctx: CommandContext,
   tui: TUIController
 ): Promise<void> {
-  if (!state.chatAgent) return;
+  if (!state.chatAgent) {
+    tui.addInfoMessage(chalk.yellow('Agent unavailable'));
+    return;
+  }
 
   // Handle @file references
   let fileReferenceContext = '';
@@ -2078,10 +2087,18 @@ async function runChatTUI(
       tui.prompt();
     });
 
-    // Handle Ctrl+C
+    // Handle Ctrl+C — 3-tier cancellation (mirrors REPL SIGINT)
     tui.onSIGINT(() => {
-      const coordinator = getBackgroundIndexingCoordinator();
+      // Tier 1: Cancel in-flight agent work
+      if (state.agentAbortController) {
+        state.agentAbortController.abort();
+        state.agentAbortController = undefined;
+        tui.prompt();
+        return;
+      }
 
+      // Tier 2: Cancel background indexing
+      const coordinator = getBackgroundIndexingCoordinator();
       if (coordinator.isRunning()) {
         coordinator.cancel();
         tuiCtx.log(chalk.yellow('Indexing cancelled.'));
@@ -2089,6 +2106,7 @@ async function runChatTUI(
         return;
       }
 
+      // Tier 3: Exit chat
       tuiCtx.log(chalk.dim('Goodbye!'));
       cleanup();
       resolve();
@@ -2485,8 +2503,9 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       // ─────────────────────────────────────────────────────────────────────
       ctx.debug('Creating LLM provider...');
 
-      let provider: ChatState['llmProvider'];
-      let fullLLMProvider: LLMProvider | undefined;
+      // provider is the full LLMProvider (chat + streamChat). ChatState.llmProvider
+      // narrows it structurally for legacy consumers that only need streamChat.
+      let provider: LLMProvider;
       let providerName: string;
       let model: string;
 
@@ -2500,7 +2519,6 @@ export function createChatCommand(getContext: () => CommandContext): Command {
             storedProvider.config
           );
           provider = result.provider;
-          fullLLMProvider = result.provider;
           providerName = result.displayName;
           model = result.model;
         } catch (error) {
@@ -2516,7 +2534,6 @@ export function createChatCommand(getContext: () => CommandContext): Command {
             },
           });
           provider = result.provider;
-          fullLLMProvider = result.provider;
           providerName = result.name;
           model = result.model;
         }
@@ -2530,7 +2547,6 @@ export function createChatCommand(getContext: () => CommandContext): Command {
           },
         });
         provider = result.provider;
-        fullLLMProvider = result.provider;
         providerName = result.name;
         model = result.model;
       }
@@ -2615,11 +2631,8 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       // ─────────────────────────────────────────────────────────────────────
       let chatAgent: ChatAgent | undefined;
       try {
-        if (!fullLLMProvider) {
-          throw new Error('Full LLM provider not available');
-        }
         chatAgent = new ChatAgent({
-          llmProvider: fullLLMProvider,
+          llmProvider: provider,
           routingEngine,
           allProjects,
           currentProject,
@@ -2631,6 +2644,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         ctx.debug(
           `Failed to create ChatAgent, using legacy RAG path: ${error instanceof Error ? error.message : String(error)}`
         );
+        ctx.warn('Agent mode unavailable — using legacy search.');
       }
 
       const state: ChatState = {
@@ -2643,7 +2657,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         queryRouter,
         allProjects,
         routingEngine,
-        fullProvider: fullLLMProvider,
+        fullProvider: provider,
         chatAgent,
       };
 
