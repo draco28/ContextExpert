@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-02-06
+
+### Added
+
+- **ReAct Chat Agent** - Autonomous reasoning agent that decides when to search, replacing the manual RAG→LLM pipeline
+- **Real-time Streaming** - Token-by-token response streaming with reasoning chain visualization in both REPL and TUI modes
+- **`retrieve-knowledge` Tool** - RAG-as-a-tool with getter/closure pattern for agent-driven context retrieval
+- **Source Citations** - Displayed after agent responses in both REPL and TUI modes
+- **Agent Phase Status** - TUI status bar shows agent phases and tool descriptions during execution
+
+### Fixed
+
+- Add user-visible warnings when ChatAgent creation fails
+- Wrap REPL agent streaming in try/finally to prevent AbortController leak
+- Add agent abort tier to TUI SIGINT handler (3-tier: cancel agent → cancel indexing → exit)
+- Graceful max-iterations handling (return last thought instead of error)
+
 ## [1.1.0] - 2026-02-06
 
 ### Added
@@ -113,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No incremental reranking** - Full rerank on each query
 - **Memory usage** - Large codebases may require significant RAM during indexing
 
-[unreleased]: https://github.com/draco28/ContextExpert/compare/v1.1.0...HEAD
+[unreleased]: https://github.com/draco28/ContextExpert/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/draco28/ContextExpert/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/draco28/ContextExpert/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/draco28/ContextExpert/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/draco28/ContextExpert/compare/v1.0.0...v1.0.1
