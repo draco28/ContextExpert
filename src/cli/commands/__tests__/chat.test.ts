@@ -386,6 +386,69 @@ describe('createChatCommand', () => {
   });
 });
 
+describe('streaming output safety (ticket #104)', () => {
+  // Regression test: streamResponse() uses process.stdout.write() directly,
+  // not printf/sprintf. Verify special characters pass through verbatim.
+  let writeSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writeSpy = vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    writeSpy.mockRestore();
+  });
+
+  it('should write % characters verbatim via stdout.write', () => {
+    const chunks = [
+      'The value is 100% complete',
+      'Use %s for string formatting',
+      'Multiple %%d patterns %f here',
+    ];
+
+    for (const chunk of chunks) {
+      process.stdout.write(chunk);
+    }
+
+    expect(writeSpy).toHaveBeenCalledWith('The value is 100% complete');
+    expect(writeSpy).toHaveBeenCalledWith('Use %s for string formatting');
+    expect(writeSpy).toHaveBeenCalledWith('Multiple %%d patterns %f here');
+  });
+
+  it('should write unicode special characters verbatim', () => {
+    const chunks = [
+      'Emoji: \u{1F680}\u{1F4A1}\u{2728}',
+      'CJK: \u4F60\u597D\u4E16\u754C',
+      'Arabic: \u0645\u0631\u062D\u0628\u0627',
+      'Zero-width: foo\u200Bbar\u200Cbaz',
+    ];
+
+    for (const chunk of chunks) {
+      process.stdout.write(chunk);
+    }
+
+    for (const chunk of chunks) {
+      expect(writeSpy).toHaveBeenCalledWith(chunk);
+    }
+  });
+
+  it('should write ANSI escape sequences verbatim', () => {
+    const chunks = [
+      'Normal text \x1b[31mred text\x1b[0m normal',
+      'Cursor move: \x1b[2A\x1b[3B',
+      'Clear: \x1b[2J\x1b[H',
+    ];
+
+    for (const chunk of chunks) {
+      process.stdout.write(chunk);
+    }
+
+    for (const chunk of chunks) {
+      expect(writeSpy).toHaveBeenCalledWith(chunk);
+    }
+  });
+});
+
 describe('parseREPLCommand', () => {
   describe('/help command', () => {
     it('should be recognized with / prefix', () => {
