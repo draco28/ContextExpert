@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-10
+
+### Added
+
+- **LLM-Based Query Routing** - Intelligent project routing for multi-project environments using LLM fallback when heuristics are uncertain (#106)
+- **AdaptiveRAG Pipeline** - Query-classification-aware search optimization via ContextAI SDK's AdaptiveRAG (#107)
+  - SIMPLE queries (greetings) skip retrieval entirely, saving ~200-400ms
+  - FACTUAL queries use standard pipeline (topK=5, rerank=true)
+  - COMPLEX queries get enhanced search (topK=10, query enhancement)
+- **Result Caching** - LRU cache (50 entries, 5-min TTL) on RAGEngineImpl for repeated queries
+- **Classification Display** - Query classification tags shown in both REPL and TUI tool result output
+
+### Changed
+
+- Single-project guard skips LLM routing calls when only one project is indexed (optimization)
+
 ## [1.2.0] - 2026-02-06
 
 ### Added
