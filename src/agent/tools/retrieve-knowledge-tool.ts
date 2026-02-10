@@ -20,7 +20,7 @@ import { z } from 'zod';
 import { defineTool, type Tool, type ToolResult } from '@contextaisdk/core';
 import type { RoutingRAGEngine } from '../routing-rag-engine.js';
 import type { ProjectMetadata } from '../query-router.js';
-import type { RAGSource, RoutingRAGResult } from '../types.js';
+import type { RAGSource, RoutingRAGResult, QueryClassification } from '../types.js';
 
 // ============================================================================
 // Types
@@ -52,6 +52,8 @@ export interface RetrieveKnowledgeOutput {
   };
   /** Total search time in milliseconds */
   searchTimeMs: number;
+  /** Query classification from AdaptiveRAG (when adaptive mode is enabled) */
+  classification?: QueryClassification;
 }
 
 // ============================================================================
@@ -144,6 +146,27 @@ export function createRetrieveKnowledgeTool(
           { finalK: input.maxResults ?? 5 }
         );
 
+        // When AdaptiveRAG skipped retrieval, return descriptive message
+        if (result.classification?.skippedRetrieval) {
+          return {
+            success: true,
+            data: {
+              context: '',
+              sourceCount: 0,
+              estimatedTokens: 0,
+              sources: [],
+              routing: {
+                method: result.routing.method,
+                projectIds: result.routing.projectIds,
+                confidence: result.routing.confidence,
+                reason: `Retrieval skipped: query classified as ${result.classification.type}. Answer from your own knowledge.`,
+              },
+              searchTimeMs: result.metadata.totalMs,
+              classification: result.classification,
+            },
+          };
+        }
+
         return {
           success: true,
           data: {
@@ -158,6 +181,7 @@ export function createRetrieveKnowledgeTool(
               reason: result.routing.reason,
             },
             searchTimeMs: result.metadata.totalMs,
+            classification: result.classification,
           },
         };
       } catch (error) {

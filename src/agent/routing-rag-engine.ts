@@ -57,7 +57,11 @@
  * ```
  */
 
-import type { EmbeddingProvider } from '@contextaisdk/rag';
+import type { EmbeddingProvider, RAGResult } from '@contextaisdk/rag';
+import {
+  AdaptiveRAG,
+  type AdaptiveRAGResult,
+} from '@contextaisdk/rag/adaptive';
 
 import {
   createProjectRouter,
@@ -70,6 +74,7 @@ import type {
   RoutingRAGEngineConfig,
   RoutingRAGResult,
   RoutingMetadata,
+  QueryClassification,
   RAGEngineOptions,
   RAGSearchResult,
   RAGSource,
@@ -197,12 +202,19 @@ export class RoutingRAGEngine {
   /** Rerank config from app config */
   private readonly rerankEnabled: boolean;
 
+  /** Whether AdaptiveRAG pipeline optimization is enabled */
+  private readonly adaptiveEnabled: boolean;
+
+  /** Pool of AdaptiveRAG wrappers per project (lazy, mirrors engines pool) */
+  private readonly adaptiveEngines: Map<string, AdaptiveRAG> = new Map();
+
   constructor(engineConfig: RoutingRAGEngineConfig) {
     this.config = engineConfig.config;
     this.embeddingProvider = engineConfig.embeddingProvider;
     this.dimensions = engineConfig.dimensions;
     this.forceRAG = engineConfig.forceRAG ?? true;
     this.rerankEnabled = engineConfig.config.search?.rerank ?? true;
+    this.adaptiveEnabled = engineConfig.adaptive !== false; // default: true
 
     // Create router (heuristic-only if no LLM provider)
     this.router = createProjectRouter(
@@ -286,6 +298,7 @@ export class RoutingRAGEngine {
       engine.dispose();
     }
     this.engines.clear();
+    this.adaptiveEngines.clear();
 
     // Note: fusionService uses singleton managers, don't reset them here
     // as they may be shared with other parts of the application
@@ -329,6 +342,31 @@ export class RoutingRAGEngine {
       });
     }
     return this.fusionService;
+  }
+
+  /**
+   * Get or create an AdaptiveRAG wrapper for a project engine.
+   *
+   * AdaptiveRAG wraps the SDK's RAGEngineImpl (not our Facade) to classify
+   * queries and optimize the pipeline per query complexity:
+   * - SIMPLE: skip retrieval (greetings, thanks)
+   * - FACTUAL: normal pipeline (topK=5, rerank=true)
+   * - COMPLEX: enhanced pipeline (topK=10, enhancement=true)
+   * - CONVERSATIONAL: flags needsConversationContext
+   */
+  private getOrCreateAdaptiveEngine(
+    projectId: string,
+    engine: ContextExpertRAGEngine
+  ): AdaptiveRAG {
+    let adaptive = this.adaptiveEngines.get(projectId);
+    if (!adaptive) {
+      adaptive = new AdaptiveRAG({
+        engine: engine.getSDKEngine(),
+        includeClassificationInMetadata: true,
+      });
+      this.adaptiveEngines.set(projectId, adaptive);
+    }
+    return adaptive;
   }
 
   // ==========================================================================
@@ -376,6 +414,9 @@ export class RoutingRAGEngine {
 
   /**
    * Search a single project using ContextExpertRAGEngine.
+   *
+   * When adaptive mode is enabled, wraps the search with AdaptiveRAG
+   * for query-classification-based pipeline optimization.
    */
   private async searchSingleProject(
     query: string,
@@ -383,10 +424,52 @@ export class RoutingRAGEngine {
     options: RAGEngineOptions | undefined
   ): Promise<RoutingRAGResult> {
     const projectId = routing.projectIds[0]!;
-
     const engine = await this.getOrCreateEngine(projectId);
-    const result = await engine.search(query, options);
 
+    // Adaptive path: classify query and optimize pipeline
+    if (this.adaptiveEnabled) {
+      const adaptive = this.getOrCreateAdaptiveEngine(projectId, engine);
+      const adaptiveResult: AdaptiveRAGResult = await adaptive.search(query, {
+        topK: options?.finalK ?? 5,
+        maxTokens: options?.maxTokens,
+      });
+
+      // Build classification metadata
+      const classification: QueryClassification | undefined =
+        adaptiveResult.classification
+          ? {
+              type: adaptiveResult.classification.type as QueryClassification['type'],
+              confidence: adaptiveResult.classification.confidence,
+              skippedRetrieval: adaptiveResult.skippedRetrieval,
+            }
+          : undefined;
+
+      // If retrieval was skipped, return empty result with classification
+      if (adaptiveResult.skippedRetrieval) {
+        return {
+          ...this.createEmptyResult(
+            adaptiveResult.skipReason ?? 'Retrieval skipped by adaptive classification'
+          ),
+          routing: this.toRoutingMetadata(routing),
+          classification,
+        };
+      }
+
+      // Convert AdaptiveRAGResult (extends RAGResult) through our converter
+      const ragResult = engine.convertResult(
+        adaptiveResult as RAGResult,
+        adaptiveResult.metadata.timings.totalMs
+      );
+
+      return {
+        ...ragResult,
+        routing: this.toRoutingMetadata(routing),
+        classification,
+      };
+    }
+
+    // Non-adaptive path: direct engine search (backward compatibility)
+    const result = await engine.search(query, options);
     return {
       ...result,
       routing: this.toRoutingMetadata(routing),

@@ -434,6 +434,89 @@ describe('LLMProjectRouter', () => {
     });
   });
 
+  describe('route - single-project guard', () => {
+    it('should skip LLM routing when only 1 project exists', async () => {
+      const mockLLM = {
+        chat: vi.fn(),
+        streamChat: vi.fn(),
+        name: 'mock',
+        model: 'mock-model',
+        isAvailable: vi.fn().mockResolvedValue(true),
+      };
+
+      const router = createProjectRouter(mockLLM as any);
+      const singleProject = [mockProjects[0]!];
+
+      const result = await router.route(
+        'How does authentication work?',
+        singleProject,
+        'proj-1'
+      );
+
+      // Should NOT call LLM - falls back to current project instead
+      expect(mockLLM.chat).not.toHaveBeenCalled();
+      expect(result.method).toBe('fallback_all');
+      expect(result.projectIds).toEqual(['proj-1']);
+    });
+
+    it('should use LLM routing when 2+ projects exist', async () => {
+      const mockLLM = {
+        chat: vi.fn().mockResolvedValue({
+          content: JSON.stringify({
+            projectIds: ['proj-1'],
+            confidence: 0.85,
+            reasoning: 'Auth is in api-service',
+          }),
+        }),
+        streamChat: vi.fn(),
+        name: 'mock',
+        model: 'mock-model',
+        isAvailable: vi.fn().mockResolvedValue(true),
+      };
+
+      const router = createProjectRouter(mockLLM as any);
+
+      const result = await router.route(
+        'How does authentication work?',
+        mockProjects, // 3 projects
+        undefined
+      );
+
+      expect(mockLLM.chat).toHaveBeenCalled();
+      expect(result.method).toBe('llm');
+    });
+  });
+
+  describe('route - LLM hallucinated IDs', () => {
+    it('should return confidence 0 when all LLM project IDs are invalid', async () => {
+      const mockLLM = {
+        chat: vi.fn().mockResolvedValue({
+          content: JSON.stringify({
+            projectIds: ['fake-id-1', 'fake-id-2'],
+            confidence: 0.95,
+            reasoning: 'Selected projects',
+          }),
+        }),
+        streamChat: vi.fn(),
+        name: 'mock',
+        model: 'mock-model',
+        isAvailable: vi.fn().mockResolvedValue(true),
+      };
+
+      const router = createProjectRouter(mockLLM as any);
+
+      const result = await router.route(
+        'How does authentication work?',
+        mockProjects,
+        undefined
+      );
+
+      // All IDs were invalid → confidence drops to 0 → falls back to all
+      expect(result.method).toBe('fallback_all');
+      expect(result.projectIds).toHaveLength(3);
+    });
+  });
+
   describe('updateProjects', () => {
     it('should update internal classifier with new projects', async () => {
       const router = createProjectRouter(null);
