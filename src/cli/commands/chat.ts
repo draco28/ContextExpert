@@ -2613,7 +2613,8 @@ export function createChatCommand(getContext: () => CommandContext): Command {
             embeddingProvider,
             dimensions,
             forceRAG: true, // Always search when projects exist
-            llmProvider: null, // Heuristic-only routing for now
+            llmProvider: provider, // LLM-based routing for GENERAL queries
+            adaptive: true, // AdaptiveRAG: classify queries and optimize pipeline
           });
 
           ctx.debug('RoutingRAGEngine created successfully');

@@ -6,11 +6,13 @@
  * - Multi-project search via MultiProjectFusionService
  * - Automatic query routing via LLMProjectRouter
  * - Force RAG behavior
+ * - AdaptiveRAG query classification and pipeline optimization
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { RoutingRAGEngineConfig, ProjectMetadata, RAGSearchResult } from '../types.js';
 import type { EmbeddingProvider } from '@contextaisdk/rag';
+import type { AdaptiveRAGResult } from '@contextaisdk/rag/adaptive';
 
 // Mock router
 const mockRoute = vi.fn();
@@ -26,10 +28,23 @@ vi.mock('../query-router.js', () => ({
 // Mock RAG engine
 const mockEngineSearch = vi.fn();
 const mockEngineDispose = vi.fn();
+const mockGetSDKEngine = vi.fn();
+const mockConvertResult = vi.fn();
 const mockCreateRAGEngine = vi.fn();
 vi.mock('../rag-engine.js', () => ({
   createRAGEngine: (...args: unknown[]) => mockCreateRAGEngine(...args),
   ContextExpertRAGEngine: class MockContextExpertRAGEngine {},
+}));
+
+// Mock AdaptiveRAG from SDK
+const mockAdaptiveSearch = vi.fn();
+vi.mock('@contextaisdk/rag/adaptive', () => ({
+  AdaptiveRAG: class MockAdaptiveRAG {
+    search = mockAdaptiveSearch;
+    constructor() {
+      // No-op: accepts config but we don't need it
+    }
+  },
 }));
 
 // Mock fusion service
@@ -104,10 +119,39 @@ describe('RoutingRAGEngine', () => {
 
     mockEngineSearch.mockResolvedValue(mockSingleProjectResult);
     mockEngineDispose.mockReturnValue(undefined);
+    mockGetSDKEngine.mockReturnValue({ name: 'mock-sdk-engine' });
+    mockConvertResult.mockReturnValue(mockSingleProjectResult);
     mockCreateRAGEngine.mockResolvedValue({
       search: mockEngineSearch,
       dispose: mockEngineDispose,
+      getSDKEngine: mockGetSDKEngine,
+      convertResult: mockConvertResult,
     });
+
+    // Default AdaptiveRAG mock — simulates a FACTUAL classification with normal search
+    mockAdaptiveSearch.mockResolvedValue({
+      content: '<sources><source id="1">adaptive content</source></sources>',
+      estimatedTokens: 80,
+      sources: [{ file: 'test.ts', startLine: 1, endLine: 10, score: 0.85 }],
+      assembly: { content: '', estimatedTokens: 0, chunkCount: 0, deduplicatedCount: 0, droppedCount: 0, sources: [], chunks: [] },
+      retrievalResults: [],
+      metadata: {
+        effectiveQuery: 'test query',
+        retrievedCount: 5,
+        assembledCount: 3,
+        deduplicatedCount: 0,
+        droppedCount: 0,
+        fromCache: false,
+        timings: { retrievalMs: 40, assemblyMs: 8, totalMs: 48 },
+      },
+      classification: {
+        type: 'factual',
+        confidence: 0.85,
+        features: { wordCount: 6, charCount: 30, hasQuestionWords: true, questionWords: ['how'], isGreeting: false, hasPronouns: false, pronouns: [], hasComplexKeywords: false, complexKeywords: [], hasFollowUpPattern: false, endsWithQuestion: true, potentialEntityCount: 0 },
+        recommendation: { skipRetrieval: false, enableEnhancement: false, enableReranking: true, suggestedTopK: 5, needsConversationContext: false },
+      },
+      skippedRetrieval: false,
+    } satisfies AdaptiveRAGResult);
 
     mockValidateProjects.mockReturnValue({ valid: true });
     mockLoadProjects.mockResolvedValue(undefined);
@@ -330,6 +374,204 @@ describe('RoutingRAGEngine', () => {
 
       expect(engine1).toBe(engine2);
       expect(mockCreateRAGEngine).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ============================================================================
+  // AdaptiveRAG Integration Tests
+  // ============================================================================
+
+  describe('adaptive RAG', () => {
+    it('should use AdaptiveRAG for single-project search when adaptive=true (default)', async () => {
+      const engine = createTestEngine(); // adaptive defaults to true
+
+      await engine.search('How does auth work?', mockProjects, undefined);
+
+      // AdaptiveRAG.search should have been called instead of engine.search directly
+      expect(mockAdaptiveSearch).toHaveBeenCalledWith('How does auth work?', {
+        topK: 5,
+        maxTokens: undefined,
+      });
+      // Direct engine search should NOT be called (adaptive path converts via convertResult)
+      expect(mockEngineSearch).not.toHaveBeenCalled();
+    });
+
+    it('should pass classification metadata through to result', async () => {
+      const engine = createTestEngine();
+      const result = await engine.search('How does auth work?', mockProjects, undefined);
+
+      expect(result.classification).toBeDefined();
+      expect(result.classification!.type).toBe('factual');
+      expect(result.classification!.confidence).toBe(0.85);
+      expect(result.classification!.skippedRetrieval).toBe(false);
+    });
+
+    it('should convert AdaptiveRAG result through engine.convertResult()', async () => {
+      const engine = createTestEngine();
+      await engine.search('How does auth work?', mockProjects, undefined);
+
+      // convertResult should have been called with the AdaptiveRAGResult cast as RAGResult
+      expect(mockConvertResult).toHaveBeenCalledTimes(1);
+      const [resultArg, timingArg] = mockConvertResult.mock.calls[0];
+      expect(resultArg.content).toBe('<sources><source id="1">adaptive content</source></sources>');
+      expect(timingArg).toBe(48); // totalMs from mock
+    });
+
+    it('should return empty result with classification when retrieval is skipped (SIMPLE query)', async () => {
+      // Mock AdaptiveRAG to simulate a SIMPLE classification that skips retrieval
+      mockAdaptiveSearch.mockResolvedValueOnce({
+        content: '',
+        estimatedTokens: 0,
+        sources: [],
+        assembly: { content: '', estimatedTokens: 0, chunkCount: 0, deduplicatedCount: 0, droppedCount: 0, sources: [], chunks: [] },
+        retrievalResults: [],
+        metadata: {
+          effectiveQuery: 'hello',
+          retrievedCount: 0,
+          assembledCount: 0,
+          deduplicatedCount: 0,
+          droppedCount: 0,
+          fromCache: false,
+          timings: { retrievalMs: 0, assemblyMs: 0, totalMs: 2 },
+        },
+        classification: {
+          type: 'simple',
+          confidence: 0.95,
+          features: { wordCount: 1, charCount: 5, hasQuestionWords: false, questionWords: [], isGreeting: true, hasPronouns: false, pronouns: [], hasComplexKeywords: false, complexKeywords: [], hasFollowUpPattern: false, endsWithQuestion: false, potentialEntityCount: 0 },
+          recommendation: { skipRetrieval: true, enableEnhancement: false, enableReranking: false, suggestedTopK: 0, needsConversationContext: false },
+        },
+        skippedRetrieval: true,
+        skipReason: 'Query classified as simple - no retrieval needed',
+      } satisfies AdaptiveRAGResult);
+
+      const engine = createTestEngine();
+      const result = await engine.search('hello', mockProjects, undefined);
+
+      // Should return empty result
+      expect(result.sources).toHaveLength(0);
+      expect(result.estimatedTokens).toBe(0);
+
+      // Classification should be present
+      expect(result.classification).toBeDefined();
+      expect(result.classification!.type).toBe('simple');
+      expect(result.classification!.confidence).toBe(0.95);
+      expect(result.classification!.skippedRetrieval).toBe(true);
+
+      // Routing metadata should still be present
+      expect(result.routing.method).toBe('heuristic');
+      expect(result.routing.projectIds).toEqual(['project-1']);
+
+      // engine.convertResult should NOT be called when retrieval is skipped
+      expect(mockConvertResult).not.toHaveBeenCalled();
+    });
+
+    it('should respect custom topK from options', async () => {
+      const engine = createTestEngine();
+      await engine.search('Analyze the full architecture', mockProjects, undefined, { finalK: 10 });
+
+      expect(mockAdaptiveSearch).toHaveBeenCalledWith(
+        'Analyze the full architecture',
+        { topK: 10, maxTokens: undefined }
+      );
+    });
+
+    it('should fall back to direct engine.search when adaptive=false', async () => {
+      const engine = createTestEngine({ adaptive: false });
+      const result = await engine.search('How does auth work?', mockProjects, undefined);
+
+      // AdaptiveRAG should NOT be used
+      expect(mockAdaptiveSearch).not.toHaveBeenCalled();
+      // Direct engine search should be called
+      expect(mockEngineSearch).toHaveBeenCalledWith('How does auth work?', undefined);
+      // Result should come from direct engine search (no classification)
+      expect(result.classification).toBeUndefined();
+      expect(result.sources.length).toBeGreaterThan(0);
+    });
+
+    it('should cache AdaptiveRAG instances per project', async () => {
+      const engine = createTestEngine();
+
+      // Two searches to the same project
+      await engine.search('query 1', mockProjects, undefined);
+      await engine.search('query 2', mockProjects, undefined);
+
+      // AdaptiveRAG constructor should only be called once (cached)
+      // Since vi.mock creates a new class instance, we verify by checking that
+      // getSDKEngine was only called once (it's called during AdaptiveRAG creation)
+      expect(mockGetSDKEngine).toHaveBeenCalledTimes(1);
+    });
+
+    it('should clear adaptive engines on dispose', async () => {
+      const engine = createTestEngine();
+
+      // Create an adaptive engine by searching
+      await engine.search('test', mockProjects, undefined);
+      expect(mockGetSDKEngine).toHaveBeenCalledTimes(1);
+
+      // Dispose clears both engines and adaptiveEngines maps
+      engine.dispose();
+
+      // After dispose, a new search should create a new engine + adaptive wrapper
+      mockGetSDKEngine.mockClear();
+      mockCreateRAGEngine.mockResolvedValue({
+        search: mockEngineSearch,
+        dispose: mockEngineDispose,
+        getSDKEngine: mockGetSDKEngine,
+        convertResult: mockConvertResult,
+      });
+
+      await engine.search('test again', mockProjects, undefined);
+      // Should create fresh engine + adaptive wrapper
+      expect(mockGetSDKEngine).toHaveBeenCalledTimes(1);
+      expect(mockCreateRAGEngine).toHaveBeenCalledTimes(2); // original + after dispose
+    });
+
+    it('should not use AdaptiveRAG for multi-project searches', async () => {
+      // Mock router to return multiple projects
+      mockRoute.mockResolvedValueOnce({
+        projectIds: ['project-1', 'project-2'],
+        method: 'heuristic',
+        confidence: 0.85,
+        reason: 'Multi-project query detected',
+      });
+
+      const engine = createTestEngine();
+      const result = await engine.search('Compare auth across projects', mockProjects, undefined);
+
+      // Multi-project uses fusion service, NOT AdaptiveRAG
+      expect(mockAdaptiveSearch).not.toHaveBeenCalled();
+      expect(mockFusionSearch).toHaveBeenCalled();
+      // No classification on multi-project results
+      expect(result.classification).toBeUndefined();
+    });
+
+    it('should handle AdaptiveRAG with missing classification gracefully', async () => {
+      // Mock AdaptiveRAG to return result without classification (includeClassificationInMetadata=false)
+      mockAdaptiveSearch.mockResolvedValueOnce({
+        content: '<sources>content</sources>',
+        estimatedTokens: 50,
+        sources: [],
+        assembly: { content: '', estimatedTokens: 0, chunkCount: 0, deduplicatedCount: 0, droppedCount: 0, sources: [], chunks: [] },
+        retrievalResults: [],
+        metadata: {
+          effectiveQuery: 'test',
+          retrievedCount: 3,
+          assembledCount: 3,
+          deduplicatedCount: 0,
+          droppedCount: 0,
+          fromCache: false,
+          timings: { retrievalMs: 30, assemblyMs: 5, totalMs: 35 },
+        },
+        // No classification field
+        skippedRetrieval: false,
+      } satisfies AdaptiveRAGResult);
+
+      const engine = createTestEngine();
+      const result = await engine.search('test query', mockProjects, undefined);
+
+      // Should work without classification
+      expect(result.classification).toBeUndefined();
+      expect(mockConvertResult).toHaveBeenCalled();
     });
   });
 });

@@ -59,6 +59,7 @@ import {
   type OrderingStrategy as SDKOrderingStrategy,
   type EmbeddingProvider,
 } from '@contextaisdk/rag';
+import { LRUCacheProvider } from '@contextaisdk/rag/cache';
 
 import { createAssembler } from './assembler.js';
 
@@ -280,6 +281,28 @@ export class ContextExpertRAGEngine {
         originalError
       );
     }
+  }
+
+  /**
+   * Get the underlying SDK RAGEngineImpl.
+   *
+   * Used by AdaptiveRAG to wrap the engine for query-classification-based
+   * pipeline optimization. AdaptiveRAG requires the SDK's RAGEngine interface,
+   * not our Facade wrapper.
+   */
+  getSDKEngine(): RAGEngineImpl {
+    return this.engine;
+  }
+
+  /**
+   * Convert an SDK RAGResult to our RAGSearchResult format.
+   *
+   * Exposed for AdaptiveRAG integration: AdaptiveRAG returns an
+   * AdaptiveRAGResult (extends RAGResult), which we need to convert
+   * through our standard converter.
+   */
+  convertResult(result: RAGResult, totalMs: number): RAGSearchResult {
+    return this.toRAGSearchResult(result, totalMs);
   }
 
   /**
@@ -514,13 +537,23 @@ export async function createRAGEngine(
   });
 
   // =========================================================================
-  // Step 6: Create SDK's RAGEngineImpl
+  // Step 6: Create result cache (LRU with 5-minute TTL)
+  // =========================================================================
+
+  const cache = new LRUCacheProvider<RAGResult>({
+    maxSize: 50,
+    defaultTtl: 5 * 60 * 1000, // 5 minutes
+  });
+
+  // =========================================================================
+  // Step 7: Create SDK's RAGEngineImpl
   // =========================================================================
 
   const engine = new RAGEngineImpl({
     name: `RAGEngine:${projectId}`,
     retriever,
     assembler,
+    cache,
     defaults: {
       topK: ragConfig.final_k,
       rerank: false, // FusionService already does reranking
@@ -529,7 +562,7 @@ export async function createRAGEngine(
   });
 
   // =========================================================================
-  // Step 7: Return our wrapper
+  // Step 8: Return our wrapper
   // =========================================================================
 
   return new ContextExpertRAGEngine(engine, fusionService, ragConfig);

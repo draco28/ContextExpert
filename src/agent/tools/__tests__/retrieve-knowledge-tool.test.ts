@@ -165,6 +165,7 @@ describe('createRetrieveKnowledgeTool', () => {
         reason: 'Project name detected in query',
       },
       searchTimeMs: 60,
+      classification: undefined,
     });
   });
 
@@ -219,6 +220,75 @@ describe('createRetrieveKnowledgeTool', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Search failed: timeout');
+  });
+
+  it('passes classification metadata through to output', async () => {
+    const resultWithClassification = createMockRoutingResult({
+      classification: {
+        type: 'factual',
+        confidence: 0.85,
+        skippedRetrieval: false,
+      },
+    });
+    (mockEngine.search as ReturnType<typeof vi.fn>).mockResolvedValueOnce(resultWithClassification);
+
+    const tool = createRetrieveKnowledgeTool(
+      () => mockEngine,
+      () => mockProjects,
+      () => 'project-1'
+    );
+
+    const result = await tool.execute({ query: 'How does auth work?' }, {});
+
+    expect(result.success).toBe(true);
+    expect(result.data!.classification).toEqual({
+      type: 'factual',
+      confidence: 0.85,
+      skippedRetrieval: false,
+    });
+  });
+
+  it('returns success with empty context when retrieval is skipped', async () => {
+    const skippedResult = createMockRoutingResult({
+      content: '',
+      estimatedTokens: 0,
+      sources: [],
+      rawResults: [],
+      metadata: {
+        retrievalMs: 0,
+        assemblyMs: 0,
+        totalMs: 2,
+        resultsRetrieved: 0,
+        resultsAssembled: 0,
+        fromCache: false,
+      },
+      classification: {
+        type: 'simple',
+        confidence: 0.95,
+        skippedRetrieval: true,
+      },
+    });
+    (mockEngine.search as ReturnType<typeof vi.fn>).mockResolvedValueOnce(skippedResult);
+
+    const tool = createRetrieveKnowledgeTool(
+      () => mockEngine,
+      () => mockProjects,
+      () => 'project-1'
+    );
+
+    const result = await tool.execute({ query: 'hello' }, {});
+
+    // Should return success (not error) so agent doesn't retry
+    expect(result.success).toBe(true);
+    expect(result.data!.context).toBe('');
+    expect(result.data!.sourceCount).toBe(0);
+    expect(result.data!.classification).toEqual({
+      type: 'simple',
+      confidence: 0.95,
+      skippedRetrieval: true,
+    });
+    expect(result.data!.routing.reason).toContain('Retrieval skipped');
+    expect(result.data!.routing.reason).toContain('simple');
   });
 
   it('uses getter functions for dynamic state (supports /focus)', async () => {

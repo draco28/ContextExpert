@@ -527,7 +527,8 @@ export class LLMProjectRouter {
     }
 
     // Step 2: GENERAL intent - try LLM routing
-    if (this.llmProvider) {
+    // Only invoke LLM when 2+ projects exist (single project is always picked by fallback)
+    if (this.llmProvider && projects.length >= 2) {
       try {
         const llmResult = await this.routeWithLLM(query, projects);
 

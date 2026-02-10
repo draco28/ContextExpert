@@ -145,11 +145,22 @@ export async function renderAgentEventsREPL(
         const sourceCount = resultData?.sourceCount ?? 0;
         const timeMs = Math.round(event.durationMs);
 
+        // Build display string with optional classification tag
+        const classTag = resultData?.classification
+          ? chalk.dim(` [${resultData.classification.type}]`)
+          : '';
+
         // \x1b[2K clears the entire current line, then \r moves to column 0
         // This prevents remnants of the longer "Searching: ..." text leaking through
-        process.stdout.write(
-          '\x1b[2K\r' + chalk.dim(`Found ${sourceCount} source${sourceCount !== 1 ? 's' : ''} (${timeMs}ms)`) + '\n\n'
-        );
+        if (resultData?.classification?.skippedRetrieval) {
+          process.stdout.write(
+            '\x1b[2K\r' + chalk.dim(`Retrieval skipped${classTag} (${timeMs}ms)`) + '\n\n'
+          );
+        } else {
+          process.stdout.write(
+            '\x1b[2K\r' + chalk.dim(`Found ${sourceCount} source${sourceCount !== 1 ? 's' : ''}${classTag} (${timeMs}ms)`) + '\n\n'
+          );
+        }
 
         // Collect sources for citation display
         if (resultData?.sources) {
@@ -267,9 +278,19 @@ export function adaptAgentEventsForTUI(
           const resultData = event.result as RetrieveKnowledgeOutput | undefined;
           const sourceCount = resultData?.sourceCount ?? 0;
           const timeMs = Math.round(event.durationMs);
-          tui.addInfoMessage(
-            chalk.dim(`Found ${sourceCount} source${sourceCount !== 1 ? 's' : ''} (${timeMs}ms)`)
-          );
+          const classTag = resultData?.classification
+            ? ` [${resultData.classification.type}]`
+            : '';
+
+          if (resultData?.classification?.skippedRetrieval) {
+            tui.addInfoMessage(
+              chalk.dim(`Retrieval skipped${classTag} (${timeMs}ms)`)
+            );
+          } else {
+            tui.addInfoMessage(
+              chalk.dim(`Found ${sourceCount} source${sourceCount !== 1 ? 's' : ''}${classTag} (${timeMs}ms)`)
+            );
+          }
           break;
         }
 
