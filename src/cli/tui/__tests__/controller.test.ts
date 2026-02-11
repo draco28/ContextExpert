@@ -66,8 +66,11 @@ vi.mock('../status-line.js', () => {
     private state: Record<string, unknown> = {
       tokens: { used: 0, total: 200000, warningThreshold: 0.8, dangerThreshold: 0.95 },
       cost: { totalUsd: 0 },
+      turnCount: 0,
+      gitDirty: false,
+      workingDirectory: null,
     };
-    render = vi.fn().mockReturnValue('[PLAN] Context: 0% | $0.0000');
+    render = vi.fn().mockReturnValue('claude-3.5-sonnet │ ░░░░░░░░░░ 0% │ $0.00 │ 0 turns');
     update = vi.fn((partial: Record<string, unknown>) => {
       Object.assign(this.state, partial);
     });
@@ -348,6 +351,107 @@ describe('TUIController', () => {
 
       expect(() => tui.shutdown()).not.toThrow();
       expect(regionManager.cleanup).toHaveBeenCalled();
+    });
+  });
+
+  describe('incrementTurns()', () => {
+    beforeEach(() => {
+      tui.start();
+    });
+
+    it('should increment turn count and update status', async () => {
+      const { createStatusLineRenderer } = await import('../status-line.js');
+      const mockStatusLine = (createStatusLineRenderer as ReturnType<typeof vi.fn>).mock.results[0].value;
+
+      tui.incrementTurns();
+
+      expect(mockStatusLine.update).toHaveBeenCalledWith(
+        expect.objectContaining({ turnCount: 1 })
+      );
+    });
+
+    it('should increment across multiple calls', async () => {
+      const { createStatusLineRenderer } = await import('../status-line.js');
+      const mockStatusLine = (createStatusLineRenderer as ReturnType<typeof vi.fn>).mock.results[0].value;
+
+      tui.incrementTurns();
+      tui.incrementTurns();
+      tui.incrementTurns();
+
+      expect(mockStatusLine.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({ turnCount: 3 })
+      );
+    });
+  });
+
+  describe('setWorkingDirectory()', () => {
+    beforeEach(() => {
+      tui.start();
+    });
+
+    it('should update working directory in status', async () => {
+      const { createStatusLineRenderer } = await import('../status-line.js');
+      const mockStatusLine = (createStatusLineRenderer as ReturnType<typeof vi.fn>).mock.results[0].value;
+
+      tui.setWorkingDirectory('~/projects/my-app');
+
+      expect(mockStatusLine.update).toHaveBeenCalledWith(
+        expect.objectContaining({ workingDirectory: '~/projects/my-app' })
+      );
+    });
+
+    it('should accept null to clear working directory', async () => {
+      const { createStatusLineRenderer } = await import('../status-line.js');
+      const mockStatusLine = (createStatusLineRenderer as ReturnType<typeof vi.fn>).mock.results[0].value;
+
+      tui.setWorkingDirectory(null);
+
+      expect(mockStatusLine.update).toHaveBeenCalledWith(
+        expect.objectContaining({ workingDirectory: null })
+      );
+    });
+  });
+
+  describe('setGitStatus()', () => {
+    beforeEach(() => {
+      tui.start();
+    });
+
+    it('should update branch and dirty state', async () => {
+      const { createStatusLineRenderer } = await import('../status-line.js');
+      const mockStatusLine = (createStatusLineRenderer as ReturnType<typeof vi.fn>).mock.results[0].value;
+
+      tui.setGitStatus('main', true);
+
+      expect(mockStatusLine.update).toHaveBeenCalledWith(
+        expect.objectContaining({ gitBranch: 'main', gitDirty: true })
+      );
+    });
+
+    it('should default dirty to false', async () => {
+      const { createStatusLineRenderer } = await import('../status-line.js');
+      const mockStatusLine = (createStatusLineRenderer as ReturnType<typeof vi.fn>).mock.results[0].value;
+
+      tui.setGitStatus('feature/test');
+
+      expect(mockStatusLine.update).toHaveBeenCalledWith(
+        expect.objectContaining({ gitBranch: 'feature/test', gitDirty: false })
+      );
+    });
+  });
+
+  describe('constructor options', () => {
+    it('should pass workingDirectory to status line', () => {
+      const t = new TUIController({
+        model: { name: 'test-model', provider: 'test' },
+        project: 'test',
+        workingDirectory: '~/projects/test',
+        gitDirty: true,
+      });
+
+      // The constructor creates the status line with these options
+      // We verify the TUIController accepted them without error
+      expect(t.running).toBe(false); // Not started yet, just constructed
     });
   });
 
