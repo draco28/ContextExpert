@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-02-11
+
+### Changed
+
+- **Claude Code-style Status Bar** - Restyled TUI status bar with model name, working directory (`~/path`), git branch with dirty indicator (`main*`), turn counter, and phase icons in activity text (#93)
+- Cost display uses compact 2-decimal format (`$0.02` instead of `$0.0234`)
+- Removed mode indicator (`[PLAN]`/`[EXEC]`/`[WAIT]`) from status bar
+
+### Added
+
+- Git status utility (`getGitInfo`) for branch and dirty state detection
+- Regression tests for tickets #104 and #108
+
 ## [1.3.0] - 2026-02-10
 
 ### Added
@@ -146,7 +159,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No incremental reranking** - Full rerank on each query
 - **Memory usage** - Large codebases may require significant RAM during indexing
 
-[unreleased]: https://github.com/draco28/ContextExpert/compare/v1.2.0...HEAD
+[unreleased]: https://github.com/draco28/ContextExpert/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/draco28/ContextExpert/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/draco28/ContextExpert/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/draco28/ContextExpert/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/draco28/ContextExpert/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/draco28/ContextExpert/compare/v1.0.1...v1.0.2
