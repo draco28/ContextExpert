@@ -69,9 +69,25 @@ function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial
  * Used to detect and warn about unknown/misspelled keys.
  */
 const KNOWN_CONFIG_KEYS: Record<string, string[]> = {
-  root: ['default_model', 'default_provider', 'embedding', 'search'],
+  root: [
+    'default_model',
+    'default_provider',
+    'embedding',
+    'search',
+    'llm',
+    'rag',
+    'indexing',
+    'eval',
+    'observability',
+  ],
   embedding: ['provider', 'model', 'fallback_provider', 'fallback_model', 'batch_size', 'timeout_ms'],
   search: ['top_k', 'rerank'],
+  llm: ['fallback_providers', 'fallback_models'],
+  rag: ['max_tokens', 'retrieve_k', 'final_k', 'enhance_query', 'ordering'],
+  indexing: ['ignore_patterns'],
+  eval: ['golden_path', 'default_k', 'thresholds', 'python_path', 'ragas_model'],
+  thresholds: ['mrr', 'hit_rate', 'precision_at_k'],
+  observability: ['enabled', 'sample_rate', 'langfuse_public_key', 'langfuse_secret_key', 'langfuse_host'],
 };
 
 /**
