@@ -67,7 +67,8 @@ import {
 import type { Project } from '../../database/schema.js';
 import { handleProviderCommand, createProviderFromConfig } from './provider-repl.js';
 import { getDefaultProvider } from '../../config/providers.js';
-import { completeDirectoryPath } from '../utils/path-completer.js';
+import { completeDirectoryPath, contractTilde } from '../utils/path-completer.js';
+import { getGitInfo } from '../utils/git-status.js';
 import { completeFileNames } from '../utils/file-completer.js';
 import {
   parseFileReferences,
@@ -1979,12 +1980,17 @@ async function runChatTUI(
     // Create TUI controller
     // Note: omit contextWindowSize to use default 200k (actual model context window),
     // not MAX_CONTEXT_TOKENS which is the conversation sliding window limit (8k).
+    const projectDir = state.currentProject?.path ?? process.cwd();
+    const gitInfo = getGitInfo(projectDir);
     const tui = new TUIController({
       model: {
         name: state.providerInfo.model,
         provider: state.providerInfo.name,
       },
       project: state.currentProject?.name ?? null,
+      workingDirectory: contractTilde(projectDir),
+      gitBranch: gitInfo.branch,
+      gitDirty: gitInfo.dirty,
       enableMarkdown: true,
     });
 
@@ -2049,8 +2055,12 @@ async function runChatTUI(
             resolve();
             return;
           }
-          // Update TUI project if it changed
+          // Update TUI project and status bar if project changed
           tui.setProject(state.currentProject?.name ?? null);
+          const newDir = state.currentProject?.path ?? process.cwd();
+          tui.setWorkingDirectory(contractTilde(newDir));
+          const newGit = getGitInfo(newDir);
+          tui.setGitStatus(newGit.branch, newGit.dirty);
         } catch (error) {
           tuiCtx.error(`Command failed: ${error}`);
         }
@@ -2082,7 +2092,8 @@ async function runChatTUI(
         }
       }
 
-      // Return to idle and re-prompt
+      // Count the exchange and return to idle
+      tui.incrementTurns();
       tui.setActivity(AgentPhase.IDLE);
       tui.prompt();
     });

@@ -61,6 +61,10 @@ export interface TUIControllerOptions {
   project?: string | null;
   /** Initial git branch */
   gitBranch?: string | null;
+  /** Whether git working tree has uncommitted changes */
+  gitDirty?: boolean;
+  /** Initial working directory path for status bar display */
+  workingDirectory?: string | null;
   /** Context window size (for token tracking) */
   contextWindowSize?: number;
   /** Use alternate screen buffer */
@@ -123,6 +127,7 @@ export class TUIController {
   // State tracking
   private currentTokens: number = 0;
   private totalCost: number = 0;
+  private turnCount: number = 0;
 
   constructor(options: TUIControllerOptions = {}) {
     // Merge config with defaults
@@ -149,6 +154,8 @@ export class TUIController {
         model: options.model ?? { name: 'Unknown', provider: 'unknown' },
         project: options.project ?? null,
         gitBranch: options.gitBranch ?? null,
+        gitDirty: options.gitDirty ?? false,
+        workingDirectory: options.workingDirectory ?? null,
         tokens: {
           used: 0,
           total: options.contextWindowSize ?? 200000,
@@ -347,6 +354,28 @@ export class TUIController {
   }
 
   /**
+   * Increment the turn counter (call after each user-assistant exchange).
+   */
+  incrementTurns(): void {
+    this.turnCount++;
+    this.updateStatus({ turnCount: this.turnCount });
+  }
+
+  /**
+   * Set working directory for status bar display.
+   */
+  setWorkingDirectory(dir: string | null): void {
+    this.updateStatus({ workingDirectory: dir });
+  }
+
+  /**
+   * Update git status (branch and dirty state).
+   */
+  setGitStatus(branch: string | null, dirty: boolean = false): void {
+    this.updateStatus({ gitBranch: branch, gitDirty: dirty });
+  }
+
+  /**
    * Add a user message to the chat area.
    */
   addUserMessage(content: string): void {
@@ -540,7 +569,8 @@ export class TUIController {
     console.log(chalk.dim('─'.repeat(40)));
     console.log(chalk.dim('Session ended'));
     console.log(chalk.dim(`Total tokens: ${this.currentTokens.toLocaleString()}`));
-    console.log(chalk.dim(`Total cost: $${this.totalCost.toFixed(4)}`));
+    console.log(chalk.dim(`Total cost: $${this.totalCost.toFixed(2)}`));
+    console.log(chalk.dim(`Turns: ${this.turnCount}`));
     console.log(chalk.dim('─'.repeat(40)));
   }
 

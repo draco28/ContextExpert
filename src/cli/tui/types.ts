@@ -116,6 +116,12 @@ export interface StatusLineState {
   project: string | null;
   /** Current git branch (null = not in git repo) */
   gitBranch: string | null;
+  /** Whether the working tree has uncommitted changes */
+  gitDirty: boolean;
+  /** Working directory path for display (e.g., "~/projects/my-app") */
+  workingDirectory: string | null;
+  /** Number of user-assistant exchanges in the current session */
+  turnCount: number;
   /** Background indexing progress (if active) */
   indexingStatus?: {
     projectName: string;

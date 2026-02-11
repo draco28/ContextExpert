@@ -1,11 +1,13 @@
 /**
  * Status Line Renderer
  *
- * Renders the status bar HUD with:
- * - Mode indicator (Planning/Executing/Paused)
- * - Context gauge (token usage visualization)
+ * Renders a Claude Code-inspired status bar HUD with:
+ * - Model name (prominent, first position)
+ * - Location (working directory + git branch + dirty indicator)
+ * - Context gauge (token usage visualization with bar)
  * - Cost tracker (running USD total)
- * - Activity indicator (current tool/action)
+ * - Turn counter (user-assistant exchange count)
+ * - Activity indicator (phase icon + current tool/action)
  *
  * Design principles from agentic CLI UX research:
  * - "Transparency Over Magic" - users must always know what's happening
@@ -48,6 +50,9 @@ export const DEFAULT_STATUS_STATE: StatusLineState = {
   },
   project: null,
   gitBranch: null,
+  gitDirty: false,
+  workingDirectory: null,
+  turnCount: 0,
 };
 
 /**
@@ -95,18 +100,18 @@ export interface StatusLineRendererOptions {
 }
 
 /**
- * Renders the status line for the TUI.
+ * Renders the status line for the TUI (Claude Code-inspired layout).
  *
  * Example output:
  * ```
- * [PLAN] │ my-project [main] │ Context: ████░░░░░░ 42% │ $0.0234 │ Reading src/index.ts
+ * claude-3.5-sonnet │ ~/projects/my-project main* │ ████░░░░░░ 42% │ $0.02 │ 3 turns │ ⚡ Reading src/index.ts
  * ```
  */
 export class StatusLineRenderer {
   private state: StatusLineState;
   private terminalWidth: number;
   private showGitBranch: boolean;
-  /** Whether to show model name (reserved for future use) */
+  /** Whether to show model name in status bar */
   readonly showModel: boolean;
   private separator: string;
 
@@ -156,17 +161,29 @@ export class StatusLineRenderer {
 
   /**
    * Render the complete status line as a formatted string.
+   *
+   * Segment order (left = highest priority for truncation survival):
+   * 1. Model name
+   * 2. Location (path + branch + dirty)
+   * 3. Context gauge (visual bar)
+   * 4. Cost
+   * 5. Turn count
+   * 6. Activity (with phase icon)
+   * 7. Indexing status
    */
   render(): string {
     const parts: string[] = [];
 
-    // Mode indicator (always first)
-    parts.push(this.renderMode());
+    // Model name (first position, most prominent)
+    const modelPart = this.renderModel();
+    if (modelPart) {
+      parts.push(modelPart);
+    }
 
-    // Project name + git branch
-    const projectPart = this.renderProject();
-    if (projectPart) {
-      parts.push(projectPart);
+    // Location (working directory + git branch + dirty)
+    const locationPart = this.renderLocation();
+    if (locationPart) {
+      parts.push(locationPart);
     }
 
     // Context gauge
@@ -175,7 +192,10 @@ export class StatusLineRenderer {
     // Cost
     parts.push(this.renderCost());
 
-    // Activity (if active)
+    // Turn count
+    parts.push(this.renderTurns());
+
+    // Activity (if active, with phase icon)
     const activityPart = this.renderActivity();
     if (activityPart) {
       parts.push(activityPart);
@@ -200,33 +220,40 @@ export class StatusLineRenderer {
   }
 
   /**
-   * Render the mode indicator.
-   * Uses color coding based on mode.
+   * Render model name.
+   * Returns null if showModel is false or model is unknown.
    */
-  private renderMode(): string {
-    const { mode, phase } = this.state;
-    const color = MODE_COLORS[mode];
-    const label = MODE_LABELS[mode];
-    const icon = PHASE_ICONS[phase];
-
-    // Format: [MODE] icon
-    return `${color(`[${label}]`)} ${icon}`;
-  }
-
-  /**
-   * Render project name and git branch.
-   */
-  private renderProject(): string | null {
-    const { project, gitBranch } = this.state;
-
-    if (!project) {
+  private renderModel(): string | null {
+    if (!this.showModel) {
       return null;
     }
 
-    let display = chalk.green(project);
+    const { model } = this.state;
+    if (!model.name || model.name === 'Unknown') {
+      return null;
+    }
+
+    return chalk.bold(model.name);
+  }
+
+  /**
+   * Render working directory path and git branch with dirty indicator.
+   * Prefers workingDirectory over project name.
+   */
+  private renderLocation(): string | null {
+    const { workingDirectory, project, gitBranch, gitDirty } = this.state;
+
+    // Prefer workingDirectory; fall back to project name
+    const pathDisplay = workingDirectory ?? project;
+    if (!pathDisplay) {
+      return null;
+    }
+
+    let display = chalk.bold(pathDisplay);
 
     if (this.showGitBranch && gitBranch) {
-      display += chalk.dim(` [${gitBranch}]`);
+      const branchStr = gitDirty ? `${gitBranch}*` : gitBranch;
+      display += ' ' + chalk.cyan(branchStr);
     }
 
     return display;
@@ -284,8 +311,8 @@ export class StatusLineRenderer {
     const { cost } = this.state;
     const total = cost.totalUsd;
 
-    // Format to 4 decimal places for precision
-    const formatted = total.toFixed(4);
+    // Format to 2 decimal places for compact display
+    const formatted = total.toFixed(2);
 
     // Choose color based on cost
     let color: ChalkInstance;
@@ -314,7 +341,15 @@ export class StatusLineRenderer {
   }
 
   /**
-   * Render current activity description.
+   * Render the turn counter.
+   */
+  private renderTurns(): string {
+    const { turnCount } = this.state;
+    return chalk.dim(`${turnCount} turn${turnCount !== 1 ? 's' : ''}`);
+  }
+
+  /**
+   * Render current activity description with phase icon prefix.
    * Returns null if no activity is in progress.
    */
   private renderActivity(): string | null {
@@ -325,26 +360,31 @@ export class StatusLineRenderer {
       return null;
     }
 
+    const icon = PHASE_ICONS[phase];
+    let text: string;
+
     if (activity.description) {
-      return chalk.dim(activity.description);
+      text = activity.description;
+    } else if (activity.tool) {
+      text = `Using ${activity.tool}...`;
+    } else {
+      // Phase-based generic messages
+      switch (phase) {
+        case AgentPhase.THINKING:
+          text = 'Thinking...';
+          break;
+        case AgentPhase.STREAMING:
+          text = 'Responding...';
+          break;
+        case AgentPhase.TOOL_USE:
+          text = 'Working...';
+          break;
+        default:
+          return null;
+      }
     }
 
-    if (activity.tool) {
-      // Generic tool message
-      return chalk.dim(`Using ${activity.tool}...`);
-    }
-
-    // Phase-based generic messages
-    switch (phase) {
-      case AgentPhase.THINKING:
-        return chalk.dim('Thinking...');
-      case AgentPhase.STREAMING:
-        return chalk.dim('Responding...');
-      case AgentPhase.TOOL_USE:
-        return chalk.dim('Working...');
-      default:
-        return null;
-    }
+    return chalk.dim(`${icon} ${text}`);
   }
 
   /**
