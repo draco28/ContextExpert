@@ -4,6 +4,24 @@ How to use Context Expert (`ctx`) as a tool from AI agents (Claude Code, Codex, 
 
 All commands support `--json` for structured output. Always use `--json` when calling `ctx` programmatically.
 
+> **Note:** `ctx chat` is designed for interactive human use. Agents should use `ctx ask --json` or `ctx search --json` for programmatic access.
+
+## Quick Start
+
+```bash
+npm install -g @contextexpert/cli                                     # 1. Install
+ctx status --json                                                      # 2. Verify installation
+ctx index /path/to/project --name "my-project" --json                  # 3. Index a project
+ctx list --json                                                        # 4. Discover indexed projects
+ctx check my-project --json                                            # 5. Validate readiness
+ctx ask "How does auth work?" --context-only --project my-project --json  # 6. Get RAG context (no LLM cost)
+ctx search "auth middleware" --project my-project --json               # 7. Raw hybrid search
+```
+
+The `--context-only` flag on `ctx ask` returns XML-formatted code context without making an LLM call — ideal for agents that have their own LLM and just need relevant code snippets injected into their prompt.
+
+---
+
 ## Setup
 
 ### Requirements
@@ -141,6 +159,45 @@ Pre-flight health check. Use before `ctx ask` to avoid wasted LLM calls.
 | `error` | `pathExists === false` | Source directory was moved/deleted |
 | `warning` | Embedding model mismatch | Config model differs from indexed model |
 | `warning` | `filesChanged > 0` | Files modified since last index |
+
+---
+
+### `ctx index <path> --json`
+
+Index a project directory for semantic search. Required before any queries can be made against a project.
+
+```bash
+ctx index /path/to/project --name "my-project" --json
+ctx index /path/to/project --name "my-project" --force --ignore "*.test.ts,fixtures/**" --json
+```
+
+| Option | Description |
+|--------|-------------|
+| `--name, -n` | Project name (defaults to directory name) |
+| `--tags, -t` | Comma-separated tags for organization |
+| `--force` | Re-index even if project already exists |
+| `--ignore` | Comma-separated gitignore-style patterns to exclude |
+
+**Output format**: NDJSON (one JSON object per line). Parse line-by-line, not as a single JSON blob.
+
+**Event progression**:
+
+```
+{"type":"model_loading","timestamp":"...","data":{"status":"Loading model..."}}
+{"type":"stage_start","timestamp":"...","stage":"scanning","data":{"total":0}}
+{"type":"stage_complete","timestamp":"...","stage":"scanning","data":{"processed":150,"total":150,"durationMs":120}}
+{"type":"stage_start","timestamp":"...","stage":"chunking","data":{"total":150}}
+{"type":"stage_complete","timestamp":"...","stage":"chunking","data":{"processed":150,"total":150,"durationMs":340}}
+{"type":"stage_start","timestamp":"...","stage":"embedding","data":{"total":1200}}
+{"type":"stage_complete","timestamp":"...","stage":"embedding","data":{"processed":1200,"total":1200,"durationMs":8500}}
+{"type":"stage_start","timestamp":"...","stage":"storing","data":{"total":1200}}
+{"type":"stage_complete","timestamp":"...","stage":"storing","data":{"processed":1200,"total":1200,"durationMs":200}}
+{"type":"complete","timestamp":"...","data":{"result":{...}}}
+```
+
+The final `complete` event contains the full pipeline result with project stats. Agents can monitor `stage_start`/`stage_complete` events for progress tracking, or simply wait for the `complete` event.
+
+**Exit code**: `0` on success, `1` on failure (project already exists without `--force`, invalid path, etc.).
 
 ---
 
@@ -364,12 +421,24 @@ Add this to your project's `CLAUDE.md` to give Claude Code access to your indexe
 ```markdown
 ## Context Expert
 
-Search and query indexed codebases using `ctx`:
+Cross-project semantic search and RAG-powered Q&A via `ctx` CLI.
 
-- Check health: `ctx check my-project --json`
-- Get context: `ctx ask "question" --context-only --project my-project --json`
+### Quick Reference
+- System health: `ctx status --json`
+- List projects: `ctx list --json`
+- Index a project: `ctx index /path/to/project --name "name" --json`
+- Validate readiness: `ctx check my-project --json`
+- Get RAG context: `ctx ask "question" --context-only --project my-project --json`
 - Search code: `ctx search "query" --project my-project --json`
+- Full Q&A: `ctx ask "question" --project my-project --json`
 
-The `--context-only` flag returns RAG context without LLM costs.
-The `context` field in the response contains XML sources you can use directly.
+### Key Flags
+- `--context-only` — Returns XML-formatted code context without LLM call (inject directly into your prompt)
+- `--ignore "pattern1,pattern2"` — Exclude files during indexing (gitignore syntax)
+- `--force` — Re-index a project, replacing existing data
+
+### Recommended Workflow
+1. `ctx check <project> --json` — Verify project is ready
+2. `ctx ask "question" --context-only --project <name> --json` — Get context
+3. Use the `context` field from the response as RAG context in your own prompt
 ```

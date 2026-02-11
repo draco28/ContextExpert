@@ -16,6 +16,12 @@ A cross-project context agent CLI for unified semantic search and RAG-powered Q&
 - **Multi-provider LLMs** — Anthropic (Claude), OpenAI (GPT), or Ollama (local)
 - **Smart chunking** — Language-aware code parsing with Tree-sitter AST
 - **Result reranking** — BGE cross-encoder for improved relevance
+- **ReAct agent** — Autonomous reasoning with tool-use decisions in chat
+- **Real-time streaming** — Token-by-token responses with reasoning chain visualization
+- **Adaptive RAG** — Query classification (simple/factual/complex) optimizes retrieval
+- **Smart routing** — Automatic project selection via heuristic + LLM fallback
+- **TUI chat mode** — Three-region terminal UI with status bar and scroll regions
+- **Result caching** — LRU cache for repeated queries, reducing latency
 
 ## Installation
 
@@ -61,6 +67,7 @@ ctx index . --force  # Re-index, replacing existing data
 | `--name, -n` | Project name (defaults to directory name) |
 | `--tags, -t` | Comma-separated tags for filtering |
 | `--force, -f` | Replace existing index for this project |
+| `--ignore` | Comma-separated gitignore-style patterns to exclude |
 
 ### `ctx list`
 
@@ -118,12 +125,15 @@ ctx chat
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/focus <project>` | Limit context to a project |
-| `/unfocus` | Search all projects again |
-| `/projects` | List indexed projects |
+| `/focus <project>` | Focus RAG search on a specific project |
+| `/unfocus` | Clear project focus |
+| `/projects` | List all indexed projects |
+| `/describe <name>` | Add description/tags for smart routing |
 | `/clear` | Clear conversation history |
-| `/provider <name>` | Switch LLM provider |
-| `/exit` | Exit the chat session |
+| `/share [path]` | Export conversation to markdown |
+| `/index <path>` | Index a project within the chat session |
+| `/provider <sub>` | Manage LLM providers (add, list, use, remove, test) |
+| `/exit` | Exit the chat |
 
 #### TUI Mode
 
@@ -132,7 +142,7 @@ On TTY terminals, `ctx chat` launches in **TUI mode** by default — a three-reg
 | Region | Description |
 |--------|-------------|
 | **Chat area** | Scrollable message history and streaming LLM responses |
-| **Status bar** | Mode indicator, context gauge, session cost, current activity |
+| **Status bar** | Model name, working directory, git branch, turn counter, session cost |
 | **Input area** | readline-powered input with tab completion |
 
 Use `--no-tui` to fall back to the classic readline REPL (also used automatically when stdout is not a TTY, e.g., piping):
@@ -216,19 +226,26 @@ default_provider = "anthropic"  # anthropic, openai, or ollama
 provider = "huggingface"
 model = "BAAI/bge-large-en-v1.5"
 batch_size = 32
+timeout_ms = 120000              # Embedding timeout (default: 2 min)
+# fallback_provider = "ollama"   # Fallback if primary fails
+# fallback_model = "nomic-embed-text"
 
 # Search settings
 [search]
 top_k = 10
 rerank = true  # Use BGE cross-encoder
 
-# RAG settings (optional - these are defaults)
+# RAG pipeline settings (optional - these are defaults)
 [rag]
 max_tokens = 4000       # Max tokens for LLM context
 retrieve_k = 20         # Chunks to retrieve before reranking
 final_k = 5             # Chunks to include after reranking
 enhance_query = false   # Use LLM to enhance search query
 ordering = "sandwich"   # Context ordering: sandwich, chronological, relevance
+
+# Indexing settings (optional)
+[indexing]
+ignore_patterns = ["*.generated.ts", "migrations/**"]  # Additional gitignore-style patterns
 ```
 
 ## Providers
@@ -289,16 +306,16 @@ pnpm dev -- index ./test-project
 
 ```
 src/
-├── cli/        # Command definitions (index, ask, chat, etc.)
-├── agent/      # RAG engine and citation handling
-├── indexer/    # File scanning, chunking, embedding pipeline
-├── search/     # Hybrid retrieval and vector storage
-├── database/   # SQLite schema and operations
-├── providers/  # LLM and embedding provider setup
-└── config/     # Configuration loading and defaults
+├── cli/        # Commands + TUI (controller, chat-area, status-line, input)
+├── agent/      # RAG engine, ReAct chat agent, query routing, tools
+├── search/     # Hybrid search: dense, BM25, fusion, reranking
+├── indexer/    # File scanning, chunking (Tree-sitter), embedding pipeline
+├── database/   # SQLite schema, operations, migrations
+├── providers/  # LLM providers: Anthropic, OpenAI, Ollama
+├── config/     # TOML config loading with Zod validation
+├── errors/     # Custom error classes and handler
+└── utils/      # Logging, path validation, table formatting
 ```
-
-For architecture details, see [SPEC.md](./SPEC.md).
 
 ## Agent Integration
 
