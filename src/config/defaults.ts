@@ -41,6 +41,26 @@ export const DEFAULT_CONFIG: Config = {
   indexing: {
     ignore_patterns: [],
   },
+
+  // Evaluation settings - default paths and quality thresholds
+  eval: {
+    golden_path: '~/.ctx/eval',
+    default_k: 5,
+    thresholds: {
+      mrr: 0.7,
+      hit_rate: 0.85,
+      precision_at_k: 0.6,
+    },
+    python_path: 'python3',
+    ragas_model: 'gpt-4o-mini',
+  },
+
+  // Observability settings - local tracing enabled, Langfuse opt-in
+  observability: {
+    enabled: true,
+    sample_rate: 1.0,
+    langfuse_host: 'https://cloud.langfuse.com',
+  },
 };
 
 /**
@@ -76,4 +96,26 @@ rerank = ${DEFAULT_CONFIG.search.rerank}
 # These are merged with .gitignore and built-in defaults
 [indexing]
 # ignore_patterns = ["*.tmp", "scratch/", "experiments/"]
+
+# Evaluation Settings
+# Configure golden datasets, quality thresholds, and Python/RAGAS integration
+[eval]
+golden_path = "${DEFAULT_CONFIG.eval!.golden_path}"
+default_k = ${DEFAULT_CONFIG.eval!.default_k}
+# python_path = "python3"        # Only needed for: ctx eval run --ragas
+# ragas_model = "gpt-4o-mini"    # LLM judge for answer quality metrics
+
+[eval.thresholds]
+mrr = ${DEFAULT_CONFIG.eval!.thresholds.mrr}
+hit_rate = ${DEFAULT_CONFIG.eval!.thresholds.hit_rate}
+precision_at_k = ${DEFAULT_CONFIG.eval!.thresholds.precision_at_k}
+
+# Observability Settings
+# Local SQLite traces are always-on; Langfuse cloud sync is opt-in
+[observability]
+enabled = ${DEFAULT_CONFIG.observability!.enabled}
+sample_rate = ${DEFAULT_CONFIG.observability!.sample_rate}
+langfuse_host = "${DEFAULT_CONFIG.observability!.langfuse_host}"
+# langfuse_public_key = "pk-lf-..."  # or set LANGFUSE_PUBLIC_KEY env var
+# langfuse_secret_key = "sk-lf-..."  # or set LANGFUSE_SECRET_KEY env var
 `;

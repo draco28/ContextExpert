@@ -7,6 +7,7 @@
 
 import { z } from 'zod';
 import { RAGConfigSchema } from '../agent/types.js';
+import { EvalConfigSchema, ObservabilityConfigSchema } from '../eval/types.js';
 
 /**
  * Embedding provider configuration
@@ -98,6 +99,10 @@ export const ConfigSchema = z.object({
   rag: RAGConfigSchema.optional(),
   /** Optional indexing configuration */
   indexing: IndexingConfigSchema.optional(),
+  /** Optional evaluation configuration */
+  eval: EvalConfigSchema.optional(),
+  /** Optional observability configuration */
+  observability: ObservabilityConfigSchema.optional(),
 });
 
 /**
