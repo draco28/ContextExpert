@@ -59,6 +59,42 @@ describe('Config Schema', () => {
     const result = PartialConfigSchema.safeParse(partial);
     expect(result.success).toBe(true);
   });
+
+  it('validates config with eval section', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      eval: { golden_path: '/custom', default_k: 10, thresholds: { mrr: 0.8, hit_rate: 0.9, precision_at_k: 0.7 }, python_path: 'python3', ragas_model: 'gpt-4o' },
+    };
+    const result = ConfigSchema.safeParse(config);
+    expect(result.success).toBe(true);
+  });
+
+  it('validates config with observability section', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      observability: { enabled: false, sample_rate: 0.5, langfuse_host: 'https://example.com' },
+    };
+    const result = ConfigSchema.safeParse(config);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects eval.default_k outside valid range', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      eval: { ...DEFAULT_CONFIG.eval, default_k: 0 },
+    };
+    const result = ConfigSchema.safeParse(config);
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects observability.sample_rate outside valid range', () => {
+    const config = {
+      ...DEFAULT_CONFIG,
+      observability: { ...DEFAULT_CONFIG.observability, sample_rate: 2.0 },
+    };
+    const result = ConfigSchema.safeParse(config);
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('Config Loading', () => {
@@ -100,6 +136,22 @@ describe('Config Defaults', () => {
     expect(DEFAULT_CONFIG.embedding.fallback_model).toBe('mxbai-embed-large');
     expect(DEFAULT_CONFIG.search.top_k).toBe(10);
     expect(DEFAULT_CONFIG.search.rerank).toBe(true);
+  });
+
+  it('has valid eval defaults', () => {
+    expect(DEFAULT_CONFIG.eval).toBeDefined();
+    expect(DEFAULT_CONFIG.eval!.golden_path).toBe('~/.ctx/eval');
+    expect(DEFAULT_CONFIG.eval!.default_k).toBe(5);
+    expect(DEFAULT_CONFIG.eval!.thresholds.mrr).toBe(0.7);
+    expect(DEFAULT_CONFIG.eval!.thresholds.hit_rate).toBe(0.85);
+    expect(DEFAULT_CONFIG.eval!.thresholds.precision_at_k).toBe(0.6);
+  });
+
+  it('has valid observability defaults', () => {
+    expect(DEFAULT_CONFIG.observability).toBeDefined();
+    expect(DEFAULT_CONFIG.observability!.enabled).toBe(true);
+    expect(DEFAULT_CONFIG.observability!.sample_rate).toBe(1.0);
+    expect(DEFAULT_CONFIG.observability!.langfuse_host).toBe('https://cloud.langfuse.com');
   });
 
   it('default config passes full schema validation', () => {
