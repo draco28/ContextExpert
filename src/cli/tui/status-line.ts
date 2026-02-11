@@ -55,24 +55,6 @@ export const DEFAULT_STATUS_STATE: StatusLineState = {
   turnCount: 0,
 };
 
-/**
- * Color configuration for mode indicators.
- * Maps each mode to a chalk color function.
- */
-const MODE_COLORS: Record<AgentMode, ChalkInstance> = {
-  [AgentMode.PLANNING]: chalk.cyan,
-  [AgentMode.EXECUTING]: chalk.yellow,
-  [AgentMode.PAUSED]: chalk.gray,
-};
-
-/**
- * Mode labels for display.
- */
-const MODE_LABELS: Record<AgentMode, string> = {
-  [AgentMode.PLANNING]: 'PLAN',
-  [AgentMode.EXECUTING]: 'EXEC',
-  [AgentMode.PAUSED]: 'WAIT',
-};
 
 /**
  * Phase icons for activity spinner.
