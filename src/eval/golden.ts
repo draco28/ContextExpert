@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
-import type { GoldenDataset, GoldenEntry, GoldenEntrySource } from './types.js';
+import type { GoldenDataset, GoldenEntry } from './types.js';
 import { EvalError } from './types.js';
 
 // ============================================================================
