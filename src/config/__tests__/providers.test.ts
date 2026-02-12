@@ -184,7 +184,7 @@ describe('providers', () => {
     it('supports openai-compatible type with baseURL', () => {
       const config: ProviderConfig = {
         type: 'openai-compatible',
-        model: 'glm-4.7',
+        model: 'glm-5',
         baseURL: 'https://api.z.ai/api/coding/paas/v4',
         apiKey: 'sk-zai-test',
       };

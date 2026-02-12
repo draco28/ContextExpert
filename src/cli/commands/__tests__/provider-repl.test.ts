@@ -109,7 +109,7 @@ describe('provider-repl', () => {
     it('creates openai-compatible provider with baseURL', async () => {
       const config: ProviderConfig = {
         type: 'openai-compatible',
-        model: 'glm-4.7',
+        model: 'glm-5',
         baseURL: 'https://api.z.ai/api/coding/paas/v4',
         apiKey: 'sk-zai-test',
       };
@@ -117,7 +117,7 @@ describe('provider-repl', () => {
       const result = await createProviderFromConfig('z-ai', config);
 
       expect(createOpenAIProvider).toHaveBeenCalledWith({
-        model: 'glm-4.7',
+        model: 'glm-5',
         apiKey: 'sk-zai-test',
         baseURL: 'https://api.z.ai/api/coding/paas/v4',
         skipAvailabilityCheck: true,
@@ -276,7 +276,7 @@ describe('provider-repl', () => {
             name: 'z-ai',
             config: {
               type: 'openai-compatible',
-              model: 'glm-4.7',
+              model: 'glm-5',
               baseURL: 'https://api.z.ai/v4',
               apiKey: 'key',
             },

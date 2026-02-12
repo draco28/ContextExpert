@@ -256,7 +256,7 @@ To use an OpenAI-compatible provider (Z.AI, OpenRouter, etc.):
 
    OPENAI_COMPATIBLE_API_KEY="your-zai-key"
    OPENAI_COMPATIBLE_BASE_URL="https://api.z.ai/api/coding/paas/v4"
-   OPENAI_COMPATIBLE_MODEL="GLM-4.7"
+   OPENAI_COMPATIBLE_MODEL="GLM-5"
 
 4. Restart your terminal or rebuild the project
 `.trim(),

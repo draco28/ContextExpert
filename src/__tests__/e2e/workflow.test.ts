@@ -120,7 +120,7 @@ vi.mock('../../indexer/embedder/provider.js', async (importOriginal) => {
 /**
  * Mock LLM provider to return deterministic responses.
  *
- * Real LLM calls (Z.AI GLM-4.7) would:
+ * Real LLM calls (Z.AI GLM-5) would:
  * 1. Cost API credits
  * 2. Return non-deterministic responses
  * 3. Be slow (~1-2s per call)
