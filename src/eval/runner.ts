@@ -117,7 +117,13 @@ function buildComparison(
     return undefined;
   }
 
-  const previousMetrics: RetrievalMetrics = JSON.parse(previousRun.metrics);
+  let previousMetrics: RetrievalMetrics;
+  try {
+    previousMetrics = JSON.parse(previousRun.metrics);
+  } catch {
+    // Corrupted previous run metrics — skip comparison gracefully
+    return undefined;
+  }
 
   return {
     previous_run_id: previousRun.id,
@@ -165,6 +171,12 @@ export async function runEval(
   const { search, db, loadGoldenDataset: loadDataset, projectId, evalConfig } = deps;
   const k = overrideK ?? evalConfig.default_k;
 
+  if (k < 1 || k > 100 || !Number.isInteger(k)) {
+    throw EvalError.evalRunFailed(
+      `Invalid topK: ${k}. Must be an integer between 1 and 100`,
+    );
+  }
+
   // ── Step 1: Load and validate golden dataset ────────────────────────────
   const dataset = loadDataset(projectName);
 
@@ -188,9 +200,10 @@ export async function runEval(
   const tagFilteredCount = entriesWithFilePaths.length - evaluableEntries.length;
 
   if (evaluableEntries.length === 0) {
-    throw EvalError.datasetInvalid(
-      'No entries with expectedFilePaths found in golden dataset',
-    );
+    const reason = tags && tags.length > 0
+      ? `No entries match tags [${tags.join(', ')}] in golden dataset`
+      : 'No entries with expectedFilePaths found in golden dataset';
+    throw EvalError.datasetInvalid(reason);
   }
 
   // ── Step 2: Create eval_run record ──────────────────────────────────────

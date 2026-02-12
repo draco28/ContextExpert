@@ -332,6 +332,30 @@ describe('Eval Runner', () => {
 
       expect(summary.comparison).toBeUndefined();
     });
+
+    it('skips comparison gracefully when previous run has corrupted metrics', async () => {
+      // Insert a previous run with invalid JSON in metrics column
+      db.prepare(
+        `INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config, notes)
+         VALUES (?, ?, datetime('now'), '1.0', 1, ?, '{}', 'status:completed')`,
+      ).run('corrupted-run', testProjectId, 'not-valid-json!!!');
+
+      const entries = [
+        makeEntry({ query: 'q1', expectedFilePaths: ['a.ts'] }),
+      ];
+      const search = makeSearch({ q1: ['a.ts'] });
+
+      const deps = makeDeps({
+        search,
+        loadGoldenDataset: () => makeDataset(entries),
+      });
+
+      // Should succeed — corrupted previous run doesn't crash current eval
+      const summary = await runEval({ projectName: 'test-project' }, deps);
+
+      expect(summary.comparison).toBeUndefined();
+      expect(summary.metrics.mrr).toBe(1.0); // Current run still computed correctly
+    });
   });
 
   // ============================================================================
@@ -446,6 +470,30 @@ describe('Eval Runner', () => {
       const summary = await runEval({ projectName: 'test-project' }, deps);
 
       expect(summary.query_count).toBe(1);
+    });
+
+    it('shows tag-specific error when tag filtering eliminates all entries', async () => {
+      const entries = [
+        makeEntry({ query: 'q1', expectedFilePaths: ['a.ts'], tags: ['api'] }),
+        makeEntry({ query: 'q2', expectedFilePaths: ['b.ts'], tags: ['api'] }),
+      ];
+
+      const deps = makeDeps({
+        loadGoldenDataset: () => makeDataset(entries),
+      });
+
+      try {
+        await runEval(
+          { projectName: 'test-project', tags: ['nonexistent'] },
+          deps,
+        );
+        expect.unreachable('Should have thrown');
+      } catch (error) {
+        expect(error).toBeInstanceOf(EvalError);
+        expect((error as EvalError).code).toBe(EvalErrorCodes.DATASET_INVALID);
+        expect((error as EvalError).message).toContain('tags');
+        expect((error as EvalError).message).toContain('nonexistent');
+      }
     });
   });
 
@@ -601,6 +649,46 @@ describe('Eval Runner', () => {
       const summary = await runEval({ projectName: 'test-project' }, deps);
 
       expect(summary.config).toHaveProperty('top_k', 10);
+    });
+
+    it('rejects topK of 0', async () => {
+      const deps = makeDeps({
+        loadGoldenDataset: () => makeDataset([makeEntry({ query: 'q1' })]),
+      });
+
+      await expect(
+        runEval({ projectName: 'test-project', topK: 0 }, deps),
+      ).rejects.toThrow('Invalid topK');
+    });
+
+    it('rejects negative topK', async () => {
+      const deps = makeDeps({
+        loadGoldenDataset: () => makeDataset([makeEntry({ query: 'q1' })]),
+      });
+
+      await expect(
+        runEval({ projectName: 'test-project', topK: -1 }, deps),
+      ).rejects.toThrow('Invalid topK');
+    });
+
+    it('rejects topK over 100', async () => {
+      const deps = makeDeps({
+        loadGoldenDataset: () => makeDataset([makeEntry({ query: 'q1' })]),
+      });
+
+      await expect(
+        runEval({ projectName: 'test-project', topK: 101 }, deps),
+      ).rejects.toThrow('Invalid topK');
+    });
+
+    it('rejects non-integer topK', async () => {
+      const deps = makeDeps({
+        loadGoldenDataset: () => makeDataset([makeEntry({ query: 'q1' })]),
+      });
+
+      await expect(
+        runEval({ projectName: 'test-project', topK: 2.5 }, deps),
+      ).rejects.toThrow('Invalid topK');
     });
   });
 
