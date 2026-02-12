@@ -14,6 +14,7 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 
 import { DatabaseOperations } from '../operations.js';
+import { EvalResultRowSchema } from '../validation.js';
 import type { TraceInput, EvalRunInput, EvalResultInput } from '../../eval/types.js';
 
 // ============================================================================
@@ -583,6 +584,161 @@ describe('Eval Operations', () => {
       db.prepare('DELETE FROM eval_runs WHERE id = ?').run(runId);
 
       expect(ops.getEvalResults(runId)).toHaveLength(0);
+    });
+  });
+
+  // ============================================================================
+  // Input Validation (Round 2 — Zod defense-in-depth)
+  // ============================================================================
+
+  describe('Input validation', () => {
+    it('insertTrace rejects malformed input with Zod error', () => {
+      // Missing required fields — should throw ZodError, not SQLite error
+      expect(() =>
+        ops.insertTrace({} as TraceInput)
+      ).toThrow();
+
+      // Verify it's a Zod error (has `issues` property)
+      try {
+        ops.insertTrace({} as TraceInput);
+      } catch (err: unknown) {
+        expect((err as { issues?: unknown[] }).issues).toBeDefined();
+        expect(Array.isArray((err as { issues: unknown[] }).issues)).toBe(true);
+      }
+    });
+
+    it('insertTrace rejects invalid retrieval_method', () => {
+      const projectId = createTestProject();
+      expect(() =>
+        ops.insertTrace({
+          project_id: projectId,
+          query: 'test',
+          retrieved_files: [],
+          top_k: 5,
+          latency_ms: 100,
+          retrieval_method: 'invalid_method' as 'dense',
+        })
+      ).toThrow();
+    });
+
+    it('getTraces rejects invalid feedback filter', () => {
+      expect(() =>
+        ops.getTraces({ feedback: 'invalid' as 'positive' })
+      ).toThrow();
+    });
+  });
+
+  // ============================================================================
+  // Batch Insert (Round 2 — transaction-wrapped batch)
+  // ============================================================================
+
+  describe('insertEvalResults (batch)', () => {
+    it('inserts multiple results atomically and returns IDs', () => {
+      const projectId = createTestProject();
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 3,
+        metrics: { mrr: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      });
+
+      const baseResult = {
+        eval_run_id: runId,
+        expected_files: ['src/auth.ts'] as string[],
+        retrieved_files: ['src/auth.ts'] as string[],
+        latency_ms: 100,
+        metrics: { reciprocal_rank: 1, precision_at_k: 1, recall_at_k: 1, hit_rate: 1 },
+      };
+
+      const results: EvalResultInput[] = [
+        { ...baseResult, query: 'query 1', passed: true },
+        { ...baseResult, query: 'query 2', passed: false },
+        { ...baseResult, query: 'query 3', passed: true },
+      ];
+
+      const ids = ops.insertEvalResults(results);
+      expect(ids).toHaveLength(3);
+      expect(new Set(ids).size).toBe(3); // All unique
+
+      const stored = ops.getEvalResults(runId);
+      expect(stored).toHaveLength(3);
+      expect(stored.filter((r) => r.passed)).toHaveLength(2);
+      expect(stored.filter((r) => !r.passed)).toHaveLength(1);
+    });
+
+    it('handles empty array gracefully', () => {
+      const ids = ops.insertEvalResults([]);
+      expect(ids).toEqual([]);
+    });
+  });
+
+  // ============================================================================
+  // Boolean Coercion Edge Cases (Round 2 — string handling)
+  // ============================================================================
+
+  describe('EvalResultRowSchema boolean coercion', () => {
+    it('coerces string "1" to true', () => {
+      const row = {
+        id: 'test-id',
+        eval_run_id: 'run-id',
+        query: 'test',
+        expected_files: '[]',
+        retrieved_files: '[]',
+        latency_ms: 100,
+        metrics: '{}',
+        passed: '1',
+      };
+
+      const result = EvalResultRowSchema.parse(row);
+      expect(result.passed).toBe(true);
+    });
+
+    it('coerces string "0" to false', () => {
+      const row = {
+        id: 'test-id',
+        eval_run_id: 'run-id',
+        query: 'test',
+        expected_files: '[]',
+        retrieved_files: '[]',
+        latency_ms: 100,
+        metrics: '{}',
+        passed: '0',
+      };
+
+      const result = EvalResultRowSchema.parse(row);
+      expect(result.passed).toBe(false);
+    });
+
+    it('coerces empty string to false', () => {
+      const row = {
+        id: 'test-id',
+        eval_run_id: 'run-id',
+        query: 'test',
+        expected_files: '[]',
+        retrieved_files: '[]',
+        latency_ms: 100,
+        metrics: '{}',
+        passed: '',
+      };
+
+      const result = EvalResultRowSchema.parse(row);
+      expect(result.passed).toBe(false);
+    });
+
+    it('coerces integer 0 to false and 1 to true', () => {
+      const baseRow = {
+        id: 'test-id',
+        eval_run_id: 'run-id',
+        query: 'test',
+        expected_files: '[]',
+        retrieved_files: '[]',
+        latency_ms: 100,
+        metrics: '{}',
+      };
+
+      expect(EvalResultRowSchema.parse({ ...baseRow, passed: 0 }).passed).toBe(false);
+      expect(EvalResultRowSchema.parse({ ...baseRow, passed: 1 }).passed).toBe(true);
     });
   });
 });

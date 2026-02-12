@@ -21,6 +21,8 @@ import {
   EvalTraceRowSchema,
   EvalRunRowSchema,
   EvalResultRowSchema,
+  TraceInputSchema,
+  TraceFilterSchema,
   validateRow,
   validateRows,
 } from './validation.js';
@@ -492,6 +494,7 @@ export class DatabaseOperations {
    * @returns The generated trace ID (UUID)
    */
   insertTrace(trace: TraceInput): string {
+    TraceInputSchema.parse(trace);
     const id = generateId();
 
     const stmt = this.db.prepare(`
@@ -532,6 +535,7 @@ export class DatabaseOperations {
    * ```
    */
   getTraces(filter: TraceFilter): EvalTrace[] {
+    TraceFilterSchema.parse(filter);
     const conditions: string[] = [];
     const params: Record<string, unknown> = {};
 
@@ -556,10 +560,13 @@ export class DatabaseOperations {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const limit = filter.limit ? `LIMIT ${Math.max(1, Math.floor(filter.limit))}` : '';
+    const limitClause = filter.limit ? 'LIMIT @limit' : '';
+    if (filter.limit) {
+      params.limit = Math.max(1, Math.floor(filter.limit));
+    }
 
     const rows = this.db
-      .prepare(`SELECT * FROM eval_traces ${where} ORDER BY timestamp DESC ${limit}`)
+      .prepare(`SELECT * FROM eval_traces ${where} ORDER BY timestamp DESC ${limitClause}`)
       .all(params);
 
     return validateRows(EvalTraceRowSchema, rows, 'eval_traces');
@@ -642,13 +649,17 @@ export class DatabaseOperations {
    * Used by `ctx eval report` to show trends.
    */
   getEvalRuns(projectId: string, limit?: number): EvalRun[] {
-    const limitClause = limit ? `LIMIT ${Math.max(1, Math.floor(limit))}` : '';
+    const limitClause = limit ? 'LIMIT @limit' : '';
+    const params: Record<string, unknown> = { projectId };
+    if (limit) {
+      params.limit = Math.max(1, Math.floor(limit));
+    }
 
     const rows = this.db
       .prepare(
         `SELECT * FROM eval_runs WHERE project_id = @projectId ORDER BY timestamp DESC ${limitClause}`
       )
-      .all({ projectId });
+      .all(params);
 
     return validateRows(EvalRunRowSchema, rows, 'eval_runs');
   }
@@ -701,6 +712,44 @@ export class DatabaseOperations {
     });
 
     return id;
+  }
+
+  /**
+   * Insert multiple eval results in a single transaction.
+   *
+   * Used by the eval runner to store all per-query results atomically.
+   * Wrapping in a transaction improves performance (one commit vs N commits)
+   * and ensures atomicity (all results stored or none).
+   *
+   * @returns Array of generated result IDs (UUIDs)
+   */
+  insertEvalResults(results: EvalResultInput[]): string[] {
+    const ids: string[] = [];
+
+    const stmt = this.db.prepare(`
+      INSERT INTO eval_results (id, eval_run_id, query, expected_files, retrieved_files, latency_ms, metrics, passed)
+      VALUES (@id, @evalRunId, @query, @expectedFiles, @retrievedFiles, @latencyMs, @metrics, @passed)
+    `);
+
+    const insertMany = this.db.transaction((resultsToInsert: EvalResultInput[]) => {
+      for (const result of resultsToInsert) {
+        const id = generateId();
+        ids.push(id);
+        stmt.run({
+          id,
+          evalRunId: result.eval_run_id,
+          query: result.query,
+          expectedFiles: JSON.stringify(result.expected_files),
+          retrievedFiles: JSON.stringify(result.retrieved_files),
+          latencyMs: result.latency_ms,
+          metrics: JSON.stringify(result.metrics),
+          passed: result.passed ? 1 : 0,
+        });
+      }
+    });
+
+    insertMany(results);
+    return ids;
   }
 
   /**

@@ -147,6 +147,41 @@ export const FileHashRowSchema = z.object({
 export type FileHashRow = z.infer<typeof FileHashRowSchema>;
 
 // ============================================================================
+// Eval Input Validation Schemas (Defense-in-depth)
+// ============================================================================
+
+/**
+ * Zod schema for validating TraceInput before database insertion.
+ *
+ * Catches malformed input with clear Zod error messages instead of
+ * cryptic SQLite constraint violations.
+ */
+export const TraceInputSchema = z.object({
+  project_id: z.string().min(1),
+  query: z.string().min(1),
+  retrieved_files: z.array(z.string()),
+  top_k: z.number().int().min(1),
+  latency_ms: z.number().int().min(0),
+  answer: z.string().optional(),
+  retrieval_method: z.enum(['dense', 'bm25', 'fusion']),
+  feedback: z.enum(['positive', 'negative']).optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+/**
+ * Zod schema for validating TraceFilter before query construction.
+ *
+ * Ensures filter values are well-formed before building dynamic SQL.
+ */
+export const TraceFilterSchema = z.object({
+  project_id: z.string().optional(),
+  start_date: z.string().optional(),
+  end_date: z.string().optional(),
+  feedback: z.enum(['positive', 'negative']).optional(),
+  limit: z.number().int().min(1).optional(),
+});
+
+// ============================================================================
 // Eval Trace Schema
 // ============================================================================
 
@@ -215,8 +250,12 @@ export const EvalResultRowSchema = z.object({
   latency_ms: z.number().int(),
   metrics: z.string(), // JSON per-query metrics
   passed: z
-    .union([z.number(), z.boolean()])
-    .transform((val) => (typeof val === 'number' ? val !== 0 : val)),
+    .union([z.number(), z.boolean(), z.string()])
+    .transform((val) => {
+      if (typeof val === 'boolean') return val;
+      if (typeof val === 'string') return val !== '0' && val !== '';
+      return val !== 0;
+    }),
 });
 
 /** Type inferred from EvalResultRowSchema */
