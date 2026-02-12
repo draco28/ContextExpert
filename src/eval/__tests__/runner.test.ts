@@ -9,7 +9,7 @@
  * No vi.mock() required — all dependencies injected via EvalRunnerDeps.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -118,8 +118,8 @@ describe('Eval Runner', () => {
   function makeSearch(
     resultMap: Record<string, string[]>,
     latencyMs = 50,
-  ): (query: string) => Promise<EvalSearchResult> {
-    return async (query: string) => ({
+  ): (query: string, topK: number) => Promise<EvalSearchResult> {
+    return async (query: string, _topK: number) => ({
       filePaths: resultMap[query] ?? [],
       latencyMs,
     });
@@ -399,7 +399,7 @@ describe('Eval Runner', () => {
 
       expect(summary.query_count).toBe(2); // Not 3
       const run = ops.getEvalRun(summary.run_id);
-      expect(run!.notes).toContain('1 skipped');
+      expect(run!.notes).toContain('1 skipped (no expectedFilePaths)');
     });
 
     it('filters entries by tags when specified', async () => {
@@ -426,6 +426,8 @@ describe('Eval Runner', () => {
       );
 
       expect(summary.query_count).toBe(2);
+      const run = ops.getEvalRun(summary.run_id);
+      expect(run!.notes).toContain('1 filtered by tags');
     });
 
     it('skips entries with empty expectedFilePaths array', async () => {
@@ -459,7 +461,7 @@ describe('Eval Runner', () => {
       ];
 
       let callCount = 0;
-      const failingSearch = async (query: string): Promise<EvalSearchResult> => {
+      const failingSearch = async (_query: string, _topK: number): Promise<EvalSearchResult> => {
         callCount++;
         if (callCount === 2) {
           throw new Error('network timeout');
@@ -488,7 +490,7 @@ describe('Eval Runner', () => {
         makeEntry({ query: 'q1', expectedFilePaths: ['a.ts'] }),
       ];
 
-      const failingSearch = async (): Promise<EvalSearchResult> => {
+      const failingSearch = async (_query: string, _topK: number): Promise<EvalSearchResult> => {
         throw new Error('unexpected error');
       };
 
@@ -514,7 +516,7 @@ describe('Eval Runner', () => {
       ];
 
       const originalError = EvalError.datasetInvalid('custom reason');
-      const failingSearch = async (): Promise<EvalSearchResult> => {
+      const failingSearch = async (_query: string, _topK: number): Promise<EvalSearchResult> => {
         throw originalError;
       };
 
@@ -557,6 +559,30 @@ describe('Eval Runner', () => {
       );
 
       expect(summary.config).toHaveProperty('top_k', 3);
+    });
+
+    it('passes topK to the search function', async () => {
+      const entries = [
+        makeEntry({ query: 'q1', expectedFilePaths: ['a.ts'] }),
+        makeEntry({ query: 'q2', expectedFilePaths: ['b.ts'] }),
+      ];
+
+      const searchSpy = vi.fn(async (_query: string, _topK: number) => ({
+        filePaths: ['a.ts'],
+        latencyMs: 50,
+      }));
+
+      const deps = makeDeps({
+        search: searchSpy,
+        loadGoldenDataset: () => makeDataset(entries),
+      });
+
+      await runEval({ projectName: 'test-project', topK: 7 }, deps);
+
+      // Every search call should receive topK=7
+      expect(searchSpy).toHaveBeenCalledTimes(2);
+      expect(searchSpy).toHaveBeenCalledWith('q1', 7);
+      expect(searchSpy).toHaveBeenCalledWith('q2', 7);
     });
 
     it('falls back to evalConfig.default_k when no override', async () => {

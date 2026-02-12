@@ -58,7 +58,7 @@ export interface EvalSearchResult {
  */
 export interface EvalRunnerDeps {
   /** Execute a RAG search, returning ranked file paths */
-  search: (query: string) => Promise<EvalSearchResult>;
+  search: (query: string, topK: number) => Promise<EvalSearchResult>;
   /** Database operations for storing eval runs and results */
   db: DatabaseOperations;
   /** Load the golden dataset for a project */
@@ -173,24 +173,25 @@ export async function runEval(
   }
 
   // Filter to entries with expectedFilePaths (skip answer-only entries)
-  let evaluableEntries = dataset.entries.filter(
+  const entriesWithFilePaths = dataset.entries.filter(
     (e) => e.expectedFilePaths && e.expectedFilePaths.length > 0,
   );
+  const noFilePathsCount = dataset.entries.length - entriesWithFilePaths.length;
 
   // Optionally filter by tags
+  let evaluableEntries = entriesWithFilePaths;
   if (tags && tags.length > 0) {
-    evaluableEntries = evaluableEntries.filter(
+    evaluableEntries = entriesWithFilePaths.filter(
       (e) => e.tags?.some((t) => tags.includes(t)),
     );
   }
+  const tagFilteredCount = entriesWithFilePaths.length - evaluableEntries.length;
 
   if (evaluableEntries.length === 0) {
     throw EvalError.datasetInvalid(
       'No entries with expectedFilePaths found in golden dataset',
     );
   }
-
-  const skippedCount = dataset.entries.length - evaluableEntries.length;
 
   // ── Step 2: Create eval_run record ──────────────────────────────────────
   const configSnapshot: Record<string, unknown> = {
@@ -215,7 +216,7 @@ export async function runEval(
 
     // Step 3: Run search and compute per-query metrics
     for (const entry of evaluableEntries) {
-      const { filePaths, latencyMs } = await search(entry.query);
+      const { filePaths, latencyMs } = await search(entry.query, k);
 
       const metrics = computePerQueryMetrics(
         filePaths,
@@ -252,7 +253,8 @@ export async function runEval(
     const completionNotes = [
       'status:completed',
       `${passedCount}/${evaluableEntries.length} passed`,
-      skippedCount > 0 ? `${skippedCount} skipped (no expectedFilePaths)` : '',
+      noFilePathsCount > 0 ? `${noFilePathsCount} skipped (no expectedFilePaths)` : '',
+      tagFilteredCount > 0 ? `${tagFilteredCount} filtered by tags` : '',
     ].filter(Boolean).join(' | ');
 
     db.updateEvalRun(runId, {
@@ -319,10 +321,10 @@ export function createEvalRunnerDeps(
   const evalConfig = EvalConfigSchema.parse(config.eval ?? {});
 
   return {
-    search: async (query: string): Promise<EvalSearchResult> => {
+    search: async (query: string, topK: number): Promise<EvalSearchResult> => {
       const startTime = performance.now();
       const result = await engine.search(query, {
-        finalK: evalConfig.default_k,
+        finalK: topK,
       });
       const latencyMs = Math.round(performance.now() - startTime);
 
