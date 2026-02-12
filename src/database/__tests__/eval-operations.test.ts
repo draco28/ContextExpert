@@ -1,9 +1,9 @@
 /**
  * Eval Operations Tests (Tickets #112, #113)
  *
- * Tests the eval CRUD operations: trace recording, eval run management,
- * and per-query result storage. Verifies JSON serialization round-trips,
- * dynamic filtering, boolean coercion, and foreign key cascades.
+ * Tests the eval CRUD operations via the actual DatabaseOperations class
+ * using constructor injection with a temp database. Verifies JSON serialization
+ * round-trips, dynamic filtering, boolean coercion, and foreign key cascades.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -13,13 +13,8 @@ import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 
-import {
-  EvalTraceRowSchema,
-  EvalRunRowSchema,
-  EvalResultRowSchema,
-  validateRow,
-  validateRows,
-} from '../validation.js';
+import { DatabaseOperations } from '../operations.js';
+import type { TraceInput, EvalRunInput, EvalResultInput } from '../../eval/types.js';
 
 // ============================================================================
 // Test Setup
@@ -29,6 +24,7 @@ describe('Eval Operations', () => {
   const testDir = join(tmpdir(), `ctx-eval-ops-test-${Date.now()}`);
   const testDbPath = join(testDir, 'test.db');
   let db: Database.Database;
+  let ops: DatabaseOperations;
 
   // SQL to create all tables needed for eval tests
   // Includes projects (for FK references) and all three eval tables
@@ -97,7 +93,7 @@ describe('Eval Operations', () => {
     CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id);
   `;
 
-  // Helper: create a test project and return its ID
+  // Helper: create a test project via raw SQL (project ops aren't the focus here)
   function createTestProject(name = 'test-project'): string {
     const id = randomUUID();
     const now = new Date().toISOString();
@@ -113,6 +109,8 @@ describe('Eval Operations', () => {
     db = new Database(testDbPath);
     db.pragma('foreign_keys = ON');
     db.exec(createTablesSql);
+    // Inject test database into DatabaseOperations via constructor DI
+    ops = new DatabaseOperations(db);
   });
 
   afterAll(() => {
@@ -128,7 +126,7 @@ describe('Eval Operations', () => {
   });
 
   // ============================================================================
-  // Migration 004: Table Structure
+  // Migration 004: Table Structure (raw SQL — testing schema, not operations)
   // ============================================================================
 
   describe('Migration 004: Table structure', () => {
@@ -173,37 +171,32 @@ describe('Eval Operations', () => {
   });
 
   // ============================================================================
-  // Trace Operations
+  // Trace Operations (via DatabaseOperations class)
   // ============================================================================
 
   describe('insertTrace + getTraces', () => {
     it('round-trips a trace with JSON serialization', () => {
       const projectId = createTestProject();
-      const traceId = randomUUID();
-      const now = new Date().toISOString();
 
-      // Insert trace (mimics operations.ts insertTrace)
-      db.prepare(`
-        INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, answer, retrieval_method, feedback, metadata)
-        VALUES (@id, @projectId, @query, @timestamp, @retrievedFiles, @topK, @latencyMs, @answer, @retrievalMethod, @feedback, @metadata)
-      `).run({
-        id: traceId,
-        projectId,
+      const input: TraceInput = {
+        project_id: projectId,
         query: 'How does authentication work?',
-        timestamp: now,
-        retrievedFiles: JSON.stringify(['src/auth.ts', 'src/middleware.ts']),
-        topK: 5,
-        latencyMs: 150,
+        retrieved_files: ['src/auth.ts', 'src/middleware.ts'],
+        top_k: 5,
+        latency_ms: 150,
         answer: 'Authentication uses JWT tokens...',
-        retrievalMethod: 'fusion',
+        retrieval_method: 'fusion',
         feedback: 'positive',
-        metadata: JSON.stringify({ model: 'gpt-4o' }),
-      });
+        metadata: { model: 'gpt-4o' },
+      };
 
-      // Read back and validate
-      const row = db.prepare('SELECT * FROM eval_traces WHERE id = ?').get(traceId);
-      const trace = validateRow(EvalTraceRowSchema, row, 'eval_traces');
+      const traceId = ops.insertTrace(input);
+      expect(traceId).toBeDefined();
 
+      const traces = ops.getTraces({ project_id: projectId });
+      expect(traces).toHaveLength(1);
+
+      const trace = traces[0];
       expect(trace.id).toBe(traceId);
       expect(trace.project_id).toBe(projectId);
       expect(trace.query).toBe('How does authentication work?');
@@ -218,58 +211,45 @@ describe('Eval Operations', () => {
 
     it('handles nullable fields (answer, feedback, metadata)', () => {
       const projectId = createTestProject();
-      const traceId = randomUUID();
 
-      db.prepare(`
-        INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, answer, retrieval_method, feedback, metadata)
-        VALUES (@id, @projectId, @query, @timestamp, @retrievedFiles, @topK, @latencyMs, @answer, @retrievalMethod, @feedback, @metadata)
-      `).run({
-        id: traceId,
-        projectId,
+      const traceId = ops.insertTrace({
+        project_id: projectId,
         query: 'search only query',
-        timestamp: new Date().toISOString(),
-        retrievedFiles: JSON.stringify(['src/index.ts']),
-        topK: 3,
-        latencyMs: 80,
-        answer: null,
-        retrievalMethod: 'dense',
-        feedback: null,
-        metadata: null,
+        retrieved_files: ['src/index.ts'],
+        top_k: 3,
+        latency_ms: 80,
+        retrieval_method: 'dense',
+        // answer, feedback, metadata all omitted
       });
 
-      const row = db.prepare('SELECT * FROM eval_traces WHERE id = ?').get(traceId);
-      const trace = validateRow(EvalTraceRowSchema, row, 'eval_traces');
-
-      expect(trace.answer).toBeNull();
-      expect(trace.feedback).toBeNull();
-      expect(trace.metadata).toBeNull();
+      const traces = ops.getTraces({ project_id: projectId });
+      expect(traces).toHaveLength(1);
+      expect(traces[0].id).toBe(traceId);
+      expect(traces[0].answer).toBeNull();
+      expect(traces[0].feedback).toBeNull();
+      expect(traces[0].metadata).toBeNull();
     });
 
     it('filters by project_id', () => {
       const projectA = createTestProject('project-a');
       const projectB = createTestProject('project-b');
 
-      const insertStmt = db.prepare(`
-        INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, retrieval_method)
-        VALUES (?, ?, ?, ?, '[]', 5, 100, 'dense')
-      `);
+      ops.insertTrace({ project_id: projectA, query: 'query A1', retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense' });
+      ops.insertTrace({ project_id: projectA, query: 'query A2', retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense' });
+      ops.insertTrace({ project_id: projectB, query: 'query B1', retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense' });
 
-      insertStmt.run(randomUUID(), projectA, 'query A1', '2026-02-01T00:00:00Z');
-      insertStmt.run(randomUUID(), projectA, 'query A2', '2026-02-02T00:00:00Z');
-      insertStmt.run(randomUUID(), projectB, 'query B1', '2026-02-01T00:00:00Z');
+      const tracesA = ops.getTraces({ project_id: projectA });
+      expect(tracesA).toHaveLength(2);
+      expect(tracesA.every((t) => t.project_id === projectA)).toBe(true);
 
-      // Filter by project A
-      const rows = db.prepare(
-        'SELECT * FROM eval_traces WHERE project_id = @projectId ORDER BY timestamp DESC'
-      ).all({ projectId: projectA });
-
-      const traces = validateRows(EvalTraceRowSchema, rows, 'eval_traces');
-      expect(traces).toHaveLength(2);
-      expect(traces.every((t) => t.project_id === projectA)).toBe(true);
+      const tracesB = ops.getTraces({ project_id: projectB });
+      expect(tracesB).toHaveLength(1);
     });
 
     it('filters by date range', () => {
       const projectId = createTestProject();
+
+      // Need raw SQL here because insertTrace auto-generates timestamps
       const insertStmt = db.prepare(`
         INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, retrieval_method)
         VALUES (?, ?, ?, ?, '[]', 5, 100, 'dense')
@@ -279,64 +259,42 @@ describe('Eval Operations', () => {
       insertStmt.run(randomUUID(), projectId, 'recent query', '2026-02-10T00:00:00Z');
       insertStmt.run(randomUUID(), projectId, 'newest query', '2026-02-11T00:00:00Z');
 
-      const rows = db.prepare(
-        'SELECT * FROM eval_traces WHERE timestamp >= @startDate AND timestamp <= @endDate ORDER BY timestamp DESC'
-      ).all({ startDate: '2026-02-01', endDate: '2026-02-28' });
-
-      const traces = validateRows(EvalTraceRowSchema, rows, 'eval_traces');
+      const traces = ops.getTraces({ start_date: '2026-02-01', end_date: '2026-02-28' });
       expect(traces).toHaveLength(2);
-      expect(traces[0].query).toBe('newest query');
+      expect(traces[0].query).toBe('newest query'); // DESC order
     });
 
     it('filters by feedback', () => {
       const projectId = createTestProject();
-      const insertStmt = db.prepare(`
-        INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, retrieval_method, feedback)
-        VALUES (?, ?, ?, ?, '[]', 5, 100, 'dense', ?)
-      `);
 
-      insertStmt.run(randomUUID(), projectId, 'good result', new Date().toISOString(), 'positive');
-      insertStmt.run(randomUUID(), projectId, 'bad result', new Date().toISOString(), 'negative');
-      insertStmt.run(randomUUID(), projectId, 'no feedback', new Date().toISOString(), null);
+      ops.insertTrace({ project_id: projectId, query: 'good result', retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense', feedback: 'positive' });
+      ops.insertTrace({ project_id: projectId, query: 'bad result', retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense', feedback: 'negative' });
+      ops.insertTrace({ project_id: projectId, query: 'no feedback', retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense' });
 
-      const rows = db.prepare(
-        'SELECT * FROM eval_traces WHERE feedback = @feedback'
-      ).all({ feedback: 'negative' });
-
-      const traces = validateRows(EvalTraceRowSchema, rows, 'eval_traces');
+      const traces = ops.getTraces({ feedback: 'negative' });
       expect(traces).toHaveLength(1);
       expect(traces[0].query).toBe('bad result');
     });
 
     it('respects limit', () => {
       const projectId = createTestProject();
-      const insertStmt = db.prepare(`
-        INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, retrieval_method)
-        VALUES (?, ?, ?, ?, '[]', 5, 100, 'dense')
-      `);
 
       for (let i = 0; i < 10; i++) {
-        insertStmt.run(randomUUID(), projectId, `query ${i}`, new Date().toISOString());
+        ops.insertTrace({ project_id: projectId, query: `query ${i}`, retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense' });
       }
 
-      const rows = db.prepare(
-        'SELECT * FROM eval_traces ORDER BY timestamp DESC LIMIT 3'
-      ).all();
-
-      const traces = validateRows(EvalTraceRowSchema, rows, 'eval_traces');
+      const traces = ops.getTraces({ limit: 3 });
       expect(traces).toHaveLength(3);
     });
   });
 
   // ============================================================================
-  // Eval Run Operations
+  // Eval Run Operations (via DatabaseOperations class)
   // ============================================================================
 
   describe('insertEvalRun + getEvalRuns', () => {
     it('round-trips an eval run with JSON metrics and config', () => {
       const projectId = createTestProject();
-      const runId = randomUUID();
-      const now = new Date().toISOString();
 
       const metrics = {
         mrr: 0.85,
@@ -349,23 +307,22 @@ describe('Eval Operations', () => {
 
       const config = { topK: 5, rerank: true, embeddingModel: 'bge-large' };
 
-      db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config, notes)
-        VALUES (@id, @projectId, @timestamp, @datasetVersion, @queryCount, @metrics, @config, @notes)
-      `).run({
-        id: runId,
-        projectId,
-        timestamp: now,
-        datasetVersion: '1.0',
-        queryCount: 25,
-        metrics: JSON.stringify(metrics),
-        config: JSON.stringify(config),
+      const input: EvalRunInput = {
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 25,
+        metrics,
+        config,
         notes: 'Baseline evaluation',
-      });
+      };
 
-      const row = db.prepare('SELECT * FROM eval_runs WHERE id = ?').get(runId);
-      const run = validateRow(EvalRunRowSchema, row, 'eval_runs');
+      const runId = ops.insertEvalRun(input);
+      expect(runId).toBeDefined();
 
+      const runs = ops.getEvalRuns(projectId);
+      expect(runs).toHaveLength(1);
+
+      const run = runs[0];
       expect(run.id).toBe(runId);
       expect(run.project_id).toBe(projectId);
       expect(run.dataset_version).toBe('1.0');
@@ -377,70 +334,89 @@ describe('Eval Operations', () => {
 
     it('returns runs ordered by timestamp DESC with limit', () => {
       const projectId = createTestProject();
+      const baseInput: EvalRunInput = {
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 10,
+        metrics: { mrr: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      };
 
-      const insertStmt = db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config)
-        VALUES (?, ?, ?, '1.0', 10, '{}', '{}')
-      `);
+      // Insert 3 runs (timestamps auto-generated close together)
+      ops.insertEvalRun(baseInput);
+      ops.insertEvalRun(baseInput);
+      ops.insertEvalRun(baseInput);
 
-      insertStmt.run(randomUUID(), projectId, '2026-02-01T00:00:00Z');
-      insertStmt.run(randomUUID(), projectId, '2026-02-05T00:00:00Z');
-      insertStmt.run(randomUUID(), projectId, '2026-02-10T00:00:00Z');
-
-      const rows = db.prepare(
-        'SELECT * FROM eval_runs WHERE project_id = @projectId ORDER BY timestamp DESC LIMIT 2'
-      ).all({ projectId });
-
-      const runs = validateRows(EvalRunRowSchema, rows, 'eval_runs');
+      const runs = ops.getEvalRuns(projectId, 2);
       expect(runs).toHaveLength(2);
-      // Most recent first
-      expect(runs[0].timestamp).toBe('2026-02-10T00:00:00Z');
-      expect(runs[1].timestamp).toBe('2026-02-05T00:00:00Z');
+    });
+  });
+
+  describe('getEvalRun (singular)', () => {
+    it('returns a single run by ID', () => {
+      const projectId = createTestProject();
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 5,
+        metrics: { mrr: 0.9, precision_at_k: 0.8, recall_at_k: 0.85, hit_rate: 0.95, ndcg: 0.88, map: 0.82 },
+        config: { topK: 5 },
+        notes: 'Test run',
+      });
+
+      const run = ops.getEvalRun(runId);
+      expect(run).toBeDefined();
+      expect(run!.id).toBe(runId);
+      expect(run!.dataset_version).toBe('1.0');
+      expect(run!.notes).toBe('Test run');
+    });
+
+    it('returns undefined for non-existent ID', () => {
+      const run = ops.getEvalRun('non-existent-id');
+      expect(run).toBeUndefined();
     });
   });
 
   describe('updateEvalRun', () => {
     it('updates metrics and notes without affecting other fields', () => {
       const projectId = createTestProject();
-      const runId = randomUUID();
 
-      db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config, notes)
-        VALUES (?, ?, ?, '1.0', 10, '{"mrr": 0.5}', '{}', NULL)
-      `).run(runId, projectId, new Date().toISOString());
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 10,
+        metrics: { mrr: 0.5, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      });
 
-      // Update just metrics and notes
-      db.prepare('UPDATE eval_runs SET metrics = @metrics, notes = @notes WHERE id = @id').run({
-        id: runId,
-        metrics: JSON.stringify({ mrr: 0.85 }),
+      ops.updateEvalRun(runId, {
+        metrics: { mrr: 0.85, precision_at_k: 0.7, recall_at_k: 0.9, hit_rate: 0.95, ndcg: 0.82, map: 0.78 },
         notes: 'Improved after reranking',
       });
 
-      const row = db.prepare('SELECT * FROM eval_runs WHERE id = ?').get(runId);
-      const run = validateRow(EvalRunRowSchema, row, 'eval_runs');
-
-      expect(JSON.parse(run.metrics)).toEqual({ mrr: 0.85 });
-      expect(run.notes).toBe('Improved after reranking');
-      expect(run.dataset_version).toBe('1.0'); // Unchanged
-      expect(run.query_count).toBe(10); // Unchanged
+      const run = ops.getEvalRun(runId);
+      expect(run).toBeDefined();
+      expect(JSON.parse(run!.metrics).mrr).toBe(0.85);
+      expect(run!.notes).toBe('Improved after reranking');
+      expect(run!.dataset_version).toBe('1.0'); // Unchanged
+      expect(run!.query_count).toBe(10); // Unchanged
     });
   });
 
   // ============================================================================
-  // Eval Result Operations
+  // Eval Result Operations (via DatabaseOperations class)
   // ============================================================================
 
   describe('insertEvalResult + getEvalResults', () => {
     it('round-trips a result with boolean coercion', () => {
       const projectId = createTestProject();
-      const runId = randomUUID();
-      const resultId = randomUUID();
-
-      // Create eval run first (FK requirement)
-      db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config)
-        VALUES (?, ?, ?, '1.0', 1, '{}', '{}')
-      `).run(runId, projectId, new Date().toISOString());
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 1,
+        metrics: { mrr: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      });
 
       const perQueryMetrics = {
         reciprocal_rank: 1.0,
@@ -449,77 +425,85 @@ describe('Eval Operations', () => {
         hit_rate: 1,
       };
 
-      db.prepare(`
-        INSERT INTO eval_results (id, eval_run_id, query, expected_files, retrieved_files, latency_ms, metrics, passed)
-        VALUES (@id, @evalRunId, @query, @expectedFiles, @retrievedFiles, @latencyMs, @metrics, @passed)
-      `).run({
-        id: resultId,
-        evalRunId: runId,
+      const input: EvalResultInput = {
+        eval_run_id: runId,
         query: 'How does auth work?',
-        expectedFiles: JSON.stringify(['src/auth.ts']),
-        retrievedFiles: JSON.stringify(['src/auth.ts', 'src/middleware.ts']),
-        latencyMs: 120,
-        metrics: JSON.stringify(perQueryMetrics),
-        passed: 1, // SQLite integer for true
-      });
+        expected_files: ['src/auth.ts'],
+        retrieved_files: ['src/auth.ts', 'src/middleware.ts'],
+        latency_ms: 120,
+        metrics: perQueryMetrics,
+        passed: true,
+      };
 
-      const row = db.prepare('SELECT * FROM eval_results WHERE id = ?').get(resultId);
-      const result = validateRow(EvalResultRowSchema, row, 'eval_results');
+      const resultId = ops.insertEvalResult(input);
+      expect(resultId).toBeDefined();
 
+      const results = ops.getEvalResults(runId);
+      expect(results).toHaveLength(1);
+
+      const result = results[0];
+      expect(result.id).toBe(resultId);
       expect(result.eval_run_id).toBe(runId);
       expect(result.query).toBe('How does auth work?');
       expect(JSON.parse(result.expected_files)).toEqual(['src/auth.ts']);
       expect(JSON.parse(result.retrieved_files)).toEqual(['src/auth.ts', 'src/middleware.ts']);
       expect(result.latency_ms).toBe(120);
       expect(JSON.parse(result.metrics)).toEqual(perQueryMetrics);
-      // The key test: SQLite integer 1 → boolean true
+      // Key test: boolean → integer → boolean round-trip
       expect(result.passed).toBe(true);
       expect(typeof result.passed).toBe('boolean');
     });
 
-    it('coerces passed=0 to false', () => {
+    it('coerces passed=false through the full pipeline', () => {
       const projectId = createTestProject();
-      const runId = randomUUID();
-      const resultId = randomUUID();
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 1,
+        metrics: { mrr: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      });
 
-      db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config)
-        VALUES (?, ?, ?, '1.0', 1, '{}', '{}')
-      `).run(runId, projectId, new Date().toISOString());
+      const resultId = ops.insertEvalResult({
+        eval_run_id: runId,
+        query: 'failed query',
+        expected_files: ['src/x.ts'],
+        retrieved_files: ['src/y.ts'],
+        latency_ms: 200,
+        metrics: { reciprocal_rank: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0 },
+        passed: false,
+      });
 
-      db.prepare(`
-        INSERT INTO eval_results (id, eval_run_id, query, expected_files, retrieved_files, latency_ms, metrics, passed)
-        VALUES (?, ?, 'failed query', '["src/x.ts"]', '["src/y.ts"]', 200, '{}', 0)
-      `).run(resultId, runId);
-
-      const row = db.prepare('SELECT * FROM eval_results WHERE id = ?').get(resultId);
-      const result = validateRow(EvalResultRowSchema, row, 'eval_results');
-
-      expect(result.passed).toBe(false);
-      expect(typeof result.passed).toBe('boolean');
+      const results = ops.getEvalResults(runId);
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe(resultId);
+      expect(results[0].passed).toBe(false);
+      expect(typeof results[0].passed).toBe('boolean');
     });
 
-    it('gets all results for a run', () => {
+    it('gets all results for a run with mixed pass/fail', () => {
       const projectId = createTestProject();
-      const runId = randomUUID();
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 3,
+        metrics: { mrr: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      });
 
-      db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config)
-        VALUES (?, ?, ?, '1.0', 3, '{}', '{}')
-      `).run(runId, projectId, new Date().toISOString());
+      const baseResult = {
+        eval_run_id: runId,
+        expected_files: [] as string[],
+        retrieved_files: [] as string[],
+        latency_ms: 100,
+        metrics: { reciprocal_rank: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0 },
+      };
 
-      const insertStmt = db.prepare(`
-        INSERT INTO eval_results (id, eval_run_id, query, expected_files, retrieved_files, latency_ms, metrics, passed)
-        VALUES (?, ?, ?, '[]', '[]', 100, '{}', ?)
-      `);
+      ops.insertEvalResult({ ...baseResult, query: 'query 1', passed: true });
+      ops.insertEvalResult({ ...baseResult, query: 'query 2', passed: false });
+      ops.insertEvalResult({ ...baseResult, query: 'query 3', passed: true });
 
-      insertStmt.run(randomUUID(), runId, 'query 1', 1);
-      insertStmt.run(randomUUID(), runId, 'query 2', 0);
-      insertStmt.run(randomUUID(), runId, 'query 3', 1);
-
-      const rows = db.prepare('SELECT * FROM eval_results WHERE eval_run_id = @runId').all({ runId });
-      const results = validateRows(EvalResultRowSchema, rows, 'eval_results');
-
+      const results = ops.getEvalResults(runId);
       expect(results).toHaveLength(3);
       expect(results.filter((r) => r.passed)).toHaveLength(2);
       expect(results.filter((r) => !r.passed)).toHaveLength(1);
@@ -527,88 +511,78 @@ describe('Eval Operations', () => {
   });
 
   // ============================================================================
-  // Foreign Key Cascades
+  // Foreign Key Cascades (raw SQL — testing schema behavior)
   // ============================================================================
 
   describe('CASCADE DELETE', () => {
     it('deleting a project removes its traces', () => {
       const projectId = createTestProject();
 
-      db.prepare(`
-        INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, retrieval_method)
-        VALUES (?, ?, 'test query', ?, '[]', 5, 100, 'dense')
-      `).run(randomUUID(), projectId, new Date().toISOString());
+      ops.insertTrace({ project_id: projectId, query: 'test', retrieved_files: [], top_k: 5, latency_ms: 100, retrieval_method: 'dense' });
 
-      // Verify trace exists
-      const beforeCount = (db.prepare(
-        'SELECT COUNT(*) as count FROM eval_traces WHERE project_id = ?'
-      ).get(projectId) as { count: number }).count;
-      expect(beforeCount).toBe(1);
+      expect(ops.getTraces({ project_id: projectId })).toHaveLength(1);
 
-      // Delete project
       db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
 
-      // Trace should be gone via CASCADE
-      const afterCount = (db.prepare(
-        'SELECT COUNT(*) as count FROM eval_traces WHERE project_id = ?'
-      ).get(projectId) as { count: number }).count;
-      expect(afterCount).toBe(0);
+      expect(ops.getTraces({ project_id: projectId })).toHaveLength(0);
     });
 
     it('deleting a project cascades through eval_runs to eval_results', () => {
       const projectId = createTestProject();
-      const runId = randomUUID();
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 1,
+        metrics: { mrr: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      });
 
-      // Create run and result
-      db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config)
-        VALUES (?, ?, ?, '1.0', 1, '{}', '{}')
-      `).run(runId, projectId, new Date().toISOString());
+      ops.insertEvalResult({
+        eval_run_id: runId,
+        query: 'test',
+        expected_files: [],
+        retrieved_files: [],
+        latency_ms: 100,
+        metrics: { reciprocal_rank: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0 },
+        passed: true,
+      });
 
-      db.prepare(`
-        INSERT INTO eval_results (id, eval_run_id, query, expected_files, retrieved_files, latency_ms, metrics, passed)
-        VALUES (?, ?, 'test', '[]', '[]', 100, '{}', 1)
-      `).run(randomUUID(), runId);
-
-      // Verify both exist
-      expect(
-        (db.prepare('SELECT COUNT(*) as count FROM eval_runs').get() as { count: number }).count
-      ).toBe(1);
-      expect(
-        (db.prepare('SELECT COUNT(*) as count FROM eval_results').get() as { count: number }).count
-      ).toBe(1);
+      expect(ops.getEvalRuns(projectId)).toHaveLength(1);
+      expect(ops.getEvalResults(runId)).toHaveLength(1);
 
       // Delete project — should cascade: project → run → result
       db.prepare('DELETE FROM projects WHERE id = ?').run(projectId);
 
-      expect(
-        (db.prepare('SELECT COUNT(*) as count FROM eval_runs').get() as { count: number }).count
-      ).toBe(0);
-      expect(
-        (db.prepare('SELECT COUNT(*) as count FROM eval_results').get() as { count: number }).count
-      ).toBe(0);
+      expect(ops.getEvalRuns(projectId)).toHaveLength(0);
+      expect(ops.getEvalResults(runId)).toHaveLength(0);
     });
 
     it('deleting an eval run cascades to its results', () => {
       const projectId = createTestProject();
-      const runId = randomUUID();
+      const runId = ops.insertEvalRun({
+        project_id: projectId,
+        dataset_version: '1.0',
+        query_count: 1,
+        metrics: { mrr: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0, ndcg: 0, map: 0 },
+        config: {},
+      });
 
-      db.prepare(`
-        INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config)
-        VALUES (?, ?, ?, '1.0', 1, '{}', '{}')
-      `).run(runId, projectId, new Date().toISOString());
+      ops.insertEvalResult({
+        eval_run_id: runId,
+        query: 'test',
+        expected_files: [],
+        retrieved_files: [],
+        latency_ms: 100,
+        metrics: { reciprocal_rank: 0, precision_at_k: 0, recall_at_k: 0, hit_rate: 0 },
+        passed: true,
+      });
 
-      db.prepare(`
-        INSERT INTO eval_results (id, eval_run_id, query, expected_files, retrieved_files, latency_ms, metrics, passed)
-        VALUES (?, ?, 'test', '[]', '[]', 100, '{}', 1)
-      `).run(randomUUID(), runId);
+      expect(ops.getEvalResults(runId)).toHaveLength(1);
 
       // Delete run — results should cascade
       db.prepare('DELETE FROM eval_runs WHERE id = ?').run(runId);
 
-      expect(
-        (db.prepare('SELECT COUNT(*) as count FROM eval_results').get() as { count: number }).count
-      ).toBe(0);
+      expect(ops.getEvalResults(runId)).toHaveLength(0);
     });
   });
 });

@@ -87,8 +87,8 @@ export interface ProjectStatsUpdate {
 export class DatabaseOperations {
   private db: Database.Database;
 
-  constructor() {
-    this.db = getDb();
+  constructor(db?: Database.Database) {
+    this.db = db ?? getDb();
   }
 
   /**
@@ -556,7 +556,7 @@ export class DatabaseOperations {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const limit = filter.limit ? `LIMIT ${filter.limit}` : '';
+    const limit = filter.limit ? `LIMIT ${Math.max(1, Math.floor(filter.limit))}` : '';
 
     const rows = this.db
       .prepare(`SELECT * FROM eval_traces ${where} ORDER BY timestamp DESC ${limit}`)
@@ -642,7 +642,7 @@ export class DatabaseOperations {
    * Used by `ctx eval report` to show trends.
    */
   getEvalRuns(projectId: string, limit?: number): EvalRun[] {
-    const limitClause = limit ? `LIMIT ${limit}` : '';
+    const limitClause = limit ? `LIMIT ${Math.max(1, Math.floor(limit))}` : '';
 
     const rows = this.db
       .prepare(
@@ -651,6 +651,19 @@ export class DatabaseOperations {
       .all({ projectId });
 
     return validateRows(EvalRunRowSchema, rows, 'eval_runs');
+  }
+
+  /**
+   * Get a single eval run by ID.
+   *
+   * Used when loading a specific run for detailed analysis.
+   */
+  getEvalRun(id: string): EvalRun | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM eval_runs WHERE id = @id')
+      .get({ id });
+    if (!row) return undefined;
+    return validateRow(EvalRunRowSchema, row, `eval_runs.id=${id}`);
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
