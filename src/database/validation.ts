@@ -147,6 +147,82 @@ export const FileHashRowSchema = z.object({
 export type FileHashRow = z.infer<typeof FileHashRowSchema>;
 
 // ============================================================================
+// Eval Trace Schema
+// ============================================================================
+
+/**
+ * Zod schema for validating EvalTrace rows from the eval_traces table.
+ *
+ * All JSON fields (retrieved_files, metadata) are stored as TEXT in SQLite.
+ * Validation ensures they exist as strings — parsing happens in application code.
+ */
+export const EvalTraceRowSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  query: z.string(),
+  timestamp: z.string(),
+  retrieved_files: z.string(), // JSON array stored as TEXT
+  top_k: z.number().int(),
+  latency_ms: z.number().int(),
+  answer: z.string().nullable(),
+  retrieval_method: z.string(),
+  feedback: z.string().nullable(),
+  metadata: z.string().nullable(),
+});
+
+/** Type inferred from EvalTraceRowSchema */
+export type EvalTraceRow = z.infer<typeof EvalTraceRowSchema>;
+
+// ============================================================================
+// Eval Run Schema
+// ============================================================================
+
+/**
+ * Zod schema for validating EvalRun rows from the eval_runs table.
+ *
+ * metrics and config are JSON-serialized TEXT fields.
+ */
+export const EvalRunRowSchema = z.object({
+  id: z.string(),
+  project_id: z.string(),
+  timestamp: z.string(),
+  dataset_version: z.string(),
+  query_count: z.number().int(),
+  metrics: z.string(), // JSON RetrievalMetrics
+  config: z.string(), // JSON config snapshot
+  notes: z.string().nullable(),
+});
+
+/** Type inferred from EvalRunRowSchema */
+export type EvalRunRow = z.infer<typeof EvalRunRowSchema>;
+
+// ============================================================================
+// Eval Result Schema
+// ============================================================================
+
+/**
+ * Zod schema for validating EvalResult rows from the eval_results table.
+ *
+ * The `passed` field is stored as INTEGER (0/1) in SQLite but typed as
+ * boolean in the EvalResult interface. We use .transform() to coerce.
+ */
+export const EvalResultRowSchema = z.object({
+  id: z.string(),
+  eval_run_id: z.string(),
+  query: z.string(),
+  expected_files: z.string(), // JSON array
+  retrieved_files: z.string(), // JSON array
+  latency_ms: z.number().int(),
+  metrics: z.string(), // JSON per-query metrics
+  passed: z
+    .union([z.number(), z.boolean()])
+    .transform((val) => (typeof val === 'number' ? val !== 0 : val)),
+});
+
+/** Type inferred from EvalResultRowSchema */
+export type EvalResultRow = z.infer<typeof EvalResultRowSchema>;
+
+// ============================================================================
 // Schema Validation Error
 // ============================================================================
 

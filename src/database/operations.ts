@@ -16,10 +16,26 @@ import type Database from 'better-sqlite3';
 import { getDb, getDbPath } from './connection.js';
 import { embeddingToBlob, generateId } from './schema.js';
 import type { Project } from './schema.js';
-import { ProjectRowSchema, validateRow, validateRows } from './validation.js';
+import {
+  ProjectRowSchema,
+  EvalTraceRowSchema,
+  EvalRunRowSchema,
+  EvalResultRowSchema,
+  validateRow,
+  validateRows,
+} from './validation.js';
 import type { FileType, Language } from '../indexer/types.js';
 import type { ContentType } from '../indexer/chunker/types.js';
 import { getVectorStoreManager, getBM25StoreManager } from '../search/index.js';
+import type {
+  EvalTrace,
+  TraceInput,
+  TraceFilter,
+  EvalRun,
+  EvalRunInput,
+  EvalResult,
+  EvalResultInput,
+} from '../eval/types.js';
 
 /**
  * Input for creating/updating a project.
@@ -459,6 +475,239 @@ export class DatabaseOperations {
    * });
    * ```
    */
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Eval Trace Operations (Ticket #113)
+  //
+  // Always-on local trace recording for every ask/search/chat interaction.
+  // Traces enable retrospective analysis, trend tracking, and golden dataset
+  // generation via `ctx eval golden capture`.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Insert a single trace record.
+   *
+   * Called automatically on every ask/search/chat command.
+   * Serializes native arrays/objects to JSON for SQLite storage.
+   *
+   * @returns The generated trace ID (UUID)
+   */
+  insertTrace(trace: TraceInput): string {
+    const id = generateId();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, answer, retrieval_method, feedback, metadata)
+      VALUES (@id, @projectId, @query, @timestamp, @retrievedFiles, @topK, @latencyMs, @answer, @retrievalMethod, @feedback, @metadata)
+    `);
+
+    stmt.run({
+      id,
+      projectId: trace.project_id,
+      query: trace.query,
+      timestamp: new Date().toISOString(),
+      retrievedFiles: JSON.stringify(trace.retrieved_files),
+      topK: trace.top_k,
+      latencyMs: trace.latency_ms,
+      answer: trace.answer ?? null,
+      retrievalMethod: trace.retrieval_method,
+      feedback: trace.feedback ?? null,
+      metadata: trace.metadata ? JSON.stringify(trace.metadata) : null,
+    });
+
+    return id;
+  }
+
+  /**
+   * Query traces with optional filters.
+   *
+   * Builds a dynamic WHERE clause from the provided filter.
+   * All fields are optional — omitted fields don't filter.
+   *
+   * @example
+   * ```ts
+   * // Get last 20 traces for a project
+   * db.getTraces({ project_id: 'abc', limit: 20 });
+   *
+   * // Get negative-feedback traces from this week
+   * db.getTraces({ feedback: 'negative', start_date: '2026-02-05' });
+   * ```
+   */
+  getTraces(filter: TraceFilter): EvalTrace[] {
+    const conditions: string[] = [];
+    const params: Record<string, unknown> = {};
+
+    if (filter.project_id) {
+      conditions.push('project_id = @projectId');
+      params.projectId = filter.project_id;
+    }
+
+    if (filter.start_date) {
+      conditions.push('timestamp >= @startDate');
+      params.startDate = filter.start_date;
+    }
+
+    if (filter.end_date) {
+      conditions.push('timestamp <= @endDate');
+      params.endDate = filter.end_date;
+    }
+
+    if (filter.feedback) {
+      conditions.push('feedback = @feedback');
+      params.feedback = filter.feedback;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = filter.limit ? `LIMIT ${filter.limit}` : '';
+
+    const rows = this.db
+      .prepare(`SELECT * FROM eval_traces ${where} ORDER BY timestamp DESC ${limit}`)
+      .all(params);
+
+    return validateRows(EvalTraceRowSchema, rows, 'eval_traces');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Eval Run Operations (Ticket #113)
+  //
+  // Batch evaluation run history. Each run evaluates all golden dataset entries
+  // and stores aggregate metrics for trend tracking.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Insert a new eval run record.
+   *
+   * Called when `ctx eval run` starts an evaluation.
+   * Serializes metrics and config objects to JSON.
+   *
+   * @returns The generated run ID (UUID)
+   */
+  insertEvalRun(run: EvalRunInput): string {
+    const id = generateId();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO eval_runs (id, project_id, timestamp, dataset_version, query_count, metrics, config, notes)
+      VALUES (@id, @projectId, @timestamp, @datasetVersion, @queryCount, @metrics, @config, @notes)
+    `);
+
+    stmt.run({
+      id,
+      projectId: run.project_id,
+      timestamp: new Date().toISOString(),
+      datasetVersion: run.dataset_version,
+      queryCount: run.query_count,
+      metrics: JSON.stringify(run.metrics),
+      config: JSON.stringify(run.config),
+      notes: run.notes ?? null,
+    });
+
+    return id;
+  }
+
+  /**
+   * Update an existing eval run.
+   *
+   * Used to update metrics/notes after the run completes.
+   * Only updates provided fields (like `updateProjectMetadata`).
+   */
+  updateEvalRun(
+    id: string,
+    update: Partial<Pick<EvalRunInput, 'metrics' | 'query_count' | 'notes'>>
+  ): void {
+    const updates: string[] = [];
+    const params: Record<string, unknown> = { id };
+
+    if (update.metrics !== undefined) {
+      updates.push('metrics = @metrics');
+      params.metrics = JSON.stringify(update.metrics);
+    }
+
+    if (update.query_count !== undefined) {
+      updates.push('query_count = @queryCount');
+      params.queryCount = update.query_count;
+    }
+
+    if (update.notes !== undefined) {
+      updates.push('notes = @notes');
+      params.notes = update.notes;
+    }
+
+    if (updates.length === 0) return;
+
+    this.db.prepare(`UPDATE eval_runs SET ${updates.join(', ')} WHERE id = @id`).run(params);
+  }
+
+  /**
+   * Get eval run history for a project.
+   *
+   * Returns runs ordered by most recent first.
+   * Used by `ctx eval report` to show trends.
+   */
+  getEvalRuns(projectId: string, limit?: number): EvalRun[] {
+    const limitClause = limit ? `LIMIT ${limit}` : '';
+
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM eval_runs WHERE project_id = @projectId ORDER BY timestamp DESC ${limitClause}`
+      )
+      .all({ projectId });
+
+    return validateRows(EvalRunRowSchema, rows, 'eval_runs');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Eval Result Operations (Ticket #113)
+  //
+  // Per-query results within an eval run. One record per golden dataset entry,
+  // enabling per-query analysis of failures.
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Insert a single eval result.
+   *
+   * Called once per golden dataset entry during an eval run.
+   * Converts boolean `passed` to integer for SQLite storage.
+   *
+   * @returns The generated result ID (UUID)
+   */
+  insertEvalResult(result: EvalResultInput): string {
+    const id = generateId();
+
+    const stmt = this.db.prepare(`
+      INSERT INTO eval_results (id, eval_run_id, query, expected_files, retrieved_files, latency_ms, metrics, passed)
+      VALUES (@id, @evalRunId, @query, @expectedFiles, @retrievedFiles, @latencyMs, @metrics, @passed)
+    `);
+
+    stmt.run({
+      id,
+      evalRunId: result.eval_run_id,
+      query: result.query,
+      expectedFiles: JSON.stringify(result.expected_files),
+      retrievedFiles: JSON.stringify(result.retrieved_files),
+      latencyMs: result.latency_ms,
+      metrics: JSON.stringify(result.metrics),
+      passed: result.passed ? 1 : 0,
+    });
+
+    return id;
+  }
+
+  /**
+   * Get all results for an eval run.
+   *
+   * Returns results for per-query analysis (which queries passed/failed).
+   * Zod validation coerces `passed` from integer back to boolean.
+   */
+  getEvalResults(runId: string): EvalResult[] {
+    const rows = this.db
+      .prepare('SELECT * FROM eval_results WHERE eval_run_id = @runId')
+      .all({ runId });
+
+    return validateRows(EvalResultRowSchema, rows, 'eval_results');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Project Metadata
+  // ─────────────────────────────────────────────────────────────────────────────
+
   updateProjectMetadata(
     projectId: string,
     metadata: { description?: string; tags?: string[] }

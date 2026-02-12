@@ -141,6 +141,67 @@ CREATE INDEX IF NOT EXISTS idx_projects_embedding_model ON projects(embedding_mo
 ALTER TABLE projects ADD COLUMN description TEXT;
     `.trim(),
   },
+  {
+    name: '004-add-eval-tables.sql',
+    sql: `
+-- Migration 004: Add Evaluation & Observability Tables
+-- Enables always-on local trace recording and batch evaluation against golden datasets
+-- Part of Phase 1: Storage and Schema Foundation (tickets #112, #113)
+
+-- eval_traces: Always-on local trace storage for every ask/search/chat interaction
+-- One row per RAG query, used for trend analysis and golden dataset capture
+CREATE TABLE IF NOT EXISTS eval_traces (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  query TEXT NOT NULL,
+  timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+  retrieved_files TEXT NOT NULL,    -- JSON array of file paths
+  top_k INTEGER NOT NULL,
+  latency_ms INTEGER NOT NULL,
+  answer TEXT,                     -- NULL for search-only queries
+  retrieval_method TEXT NOT NULL,  -- 'dense', 'bm25', or 'fusion'
+  feedback TEXT,                   -- 'positive' or 'negative'
+  metadata TEXT,                   -- JSON object
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_traces_project ON eval_traces(project_id);
+CREATE INDEX IF NOT EXISTS idx_eval_traces_timestamp ON eval_traces(timestamp);
+
+-- eval_runs: Batch evaluation run history
+-- One row per evaluation execution against a golden dataset
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+  dataset_version TEXT NOT NULL,
+  query_count INTEGER NOT NULL,
+  metrics TEXT NOT NULL,           -- JSON aggregated RetrievalMetrics
+  config TEXT NOT NULL,            -- JSON config snapshot used during eval
+  notes TEXT,
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_runs_project ON eval_runs(project_id);
+CREATE INDEX IF NOT EXISTS idx_eval_runs_timestamp ON eval_runs(timestamp);
+
+-- eval_results: Per-query results within an eval run
+-- One row per golden dataset entry, enabling per-query failure analysis
+CREATE TABLE IF NOT EXISTS eval_results (
+  id TEXT PRIMARY KEY,
+  eval_run_id TEXT NOT NULL,
+  query TEXT NOT NULL,
+  expected_files TEXT NOT NULL,    -- JSON array of expected file paths
+  retrieved_files TEXT NOT NULL,   -- JSON array of actually retrieved paths
+  latency_ms INTEGER NOT NULL,
+  metrics TEXT NOT NULL,           -- JSON per-query metrics
+  passed INTEGER NOT NULL DEFAULT 0,  -- SQLite boolean (0=fail, 1=pass)
+  FOREIGN KEY (eval_run_id) REFERENCES eval_runs(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id);
+    `.trim(),
+  },
 ];
 
 /**
