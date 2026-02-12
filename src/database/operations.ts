@@ -23,6 +23,8 @@ import {
   EvalResultRowSchema,
   TraceInputSchema,
   TraceFilterSchema,
+  EvalRunInputSchema,
+  EvalResultInputSchema,
   validateRow,
   validateRows,
 } from './validation.js';
@@ -588,6 +590,7 @@ export class DatabaseOperations {
    * @returns The generated run ID (UUID)
    */
   insertEvalRun(run: EvalRunInput): string {
+    EvalRunInputSchema.parse(run);
     const id = generateId();
 
     const stmt = this.db.prepare(`
@@ -693,6 +696,7 @@ export class DatabaseOperations {
    * @returns The generated result ID (UUID)
    */
   insertEvalResult(result: EvalResultInput): string {
+    EvalResultInputSchema.parse(result);
     const id = generateId();
 
     const stmt = this.db.prepare(`
@@ -733,6 +737,7 @@ export class DatabaseOperations {
 
     const insertMany = this.db.transaction((resultsToInsert: EvalResultInput[]) => {
       for (const result of resultsToInsert) {
+        EvalResultInputSchema.parse(result);
         const id = generateId();
         ids.push(id);
         stmt.run({

@@ -626,6 +626,45 @@ describe('Eval Operations', () => {
         ops.getTraces({ feedback: 'invalid' as 'positive' })
       ).toThrow();
     });
+
+    it('insertEvalRun rejects malformed input with Zod error', () => {
+      expect(() =>
+        ops.insertEvalRun({} as EvalRunInput)
+      ).toThrow();
+
+      try {
+        ops.insertEvalRun({} as EvalRunInput);
+      } catch (err: unknown) {
+        expect((err as { issues?: unknown[] }).issues).toBeDefined();
+        expect(Array.isArray((err as { issues: unknown[] }).issues)).toBe(true);
+      }
+    });
+
+    it('insertEvalResult rejects malformed input with Zod error', () => {
+      expect(() =>
+        ops.insertEvalResult({} as EvalResultInput)
+      ).toThrow();
+
+      try {
+        ops.insertEvalResult({} as EvalResultInput);
+      } catch (err: unknown) {
+        expect((err as { issues?: unknown[] }).issues).toBeDefined();
+        expect(Array.isArray((err as { issues: unknown[] }).issues)).toBe(true);
+      }
+    });
+
+    it('insertEvalResults rejects malformed item with Zod error', () => {
+      expect(() =>
+        ops.insertEvalResults([{} as EvalResultInput])
+      ).toThrow();
+
+      try {
+        ops.insertEvalResults([{} as EvalResultInput]);
+      } catch (err: unknown) {
+        expect((err as { issues?: unknown[] }).issues).toBeDefined();
+        expect(Array.isArray((err as { issues: unknown[] }).issues)).toBe(true);
+      }
+    });
   });
 
   // ============================================================================

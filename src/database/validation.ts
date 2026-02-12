@@ -181,6 +181,49 @@ export const TraceFilterSchema = z.object({
   limit: z.number().int().min(1).optional(),
 });
 
+/**
+ * Zod schema for validating EvalRunInput before database insertion.
+ *
+ * Catches malformed eval run input with clear Zod error messages.
+ * Metrics fields are constrained to [0, 1] range.
+ */
+export const EvalRunInputSchema = z.object({
+  project_id: z.string().min(1),
+  dataset_version: z.string().min(1),
+  query_count: z.number().int().min(1),
+  metrics: z.object({
+    mrr: z.number().min(0).max(1),
+    precision_at_k: z.number().min(0).max(1),
+    recall_at_k: z.number().min(0).max(1),
+    hit_rate: z.number().min(0).max(1),
+    ndcg: z.number().min(0).max(1),
+    map: z.number().min(0).max(1),
+  }),
+  config: z.record(z.unknown()),
+  notes: z.string().optional(),
+});
+
+/**
+ * Zod schema for validating EvalResultInput before database insertion.
+ *
+ * Catches malformed eval result input with clear Zod error messages.
+ * Per-query metrics fields are constrained to [0, 1] range.
+ */
+export const EvalResultInputSchema = z.object({
+  eval_run_id: z.string().min(1),
+  query: z.string().min(1),
+  expected_files: z.array(z.string()),
+  retrieved_files: z.array(z.string()),
+  latency_ms: z.number().int().min(0),
+  metrics: z.object({
+    reciprocal_rank: z.number().min(0).max(1),
+    precision_at_k: z.number().min(0).max(1),
+    recall_at_k: z.number().min(0).max(1),
+    hit_rate: z.number().min(0).max(1),
+  }),
+  passed: z.boolean(),
+});
+
 // ============================================================================
 // Eval Trace Schema
 // ============================================================================
