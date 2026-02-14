@@ -90,6 +90,7 @@ import {
   renderAgentEventsREPL,
   adaptAgentEventsForTUI,
 } from '../utils/agent-event-renderer.js';
+import { createTracer, type Tracer } from '../../observability/index.js';
 
 // ============================================================================
 // Types
@@ -159,6 +160,8 @@ export interface ChatState {
   chatAgent?: ChatAgent;
   /** AbortController for cancelling in-flight agent work (Ctrl+C support) */
   agentAbortController?: AbortController;
+  /** Tracer for observability (NoopTracer if Langfuse not configured) */
+  tracer: Tracer;
 }
 
 /**
@@ -204,6 +207,9 @@ function cleanupChatState(state: ChatState): void {
 
   // Clear conversation context
   state.conversationContext.clear();
+
+  // Shut down tracer (flushes pending Langfuse events, no-op if not configured)
+  state.tracer.shutdown().catch(() => {});
 }
 
 // ============================================================================
@@ -2474,6 +2480,10 @@ export function createChatCommand(getContext: () => CommandContext): Command {
       const config = loadConfig();
       ctx.debug(`LLM: ${config.default_model ?? 'default'}`);
 
+      // Create tracer for the chat session (NoopTracer if Langfuse not configured)
+      const tracer = createTracer(config);
+      ctx.debug(`Tracer: ${tracer.isRemote ? 'Langfuse' : 'noop'}`);
+
       // ─────────────────────────────────────────────────────────────────────
       // 2. Resolve initial project (optional)
       // ─────────────────────────────────────────────────────────────────────
@@ -2671,6 +2681,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
         routingEngine,
         fullProvider: provider,
         chatAgent,
+        tracer,
       };
 
       // TUI is default on TTY; --no-tui falls back to classic readline REPL

@@ -32,6 +32,7 @@ import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import type { Project } from '../../database/schema.js';
 import type { RAGSearchResult } from '../../agent/types.js';
+import { createTracer } from '../../observability/index.js';
 
 // ============================================================================
 // Types
@@ -384,6 +385,15 @@ export function createAskCommand(getContext: () => CommandContext): Command {
       const config = loadConfig();
       ctx.debug(`Embedding: ${config.embedding.model} (${config.embedding.provider})`);
 
+      // Create tracer (NoopTracer if Langfuse not configured)
+      const tracer = createTracer(config);
+      const trace = tracer.trace({
+        name: 'ctx-ask',
+        input: trimmedQuestion,
+        metadata: { project: project.name, topK },
+      });
+      ctx.debug(`Tracer: ${tracer.isRemote ? 'Langfuse' : 'noop'}`);
+
       ctx.debug('Creating RAG engine...');
       const ragEngine = await createRAGEngine(config, String(project.id));
 
@@ -565,5 +575,9 @@ export function createAskCommand(getContext: () => CommandContext): Command {
           ctx.log(chalk.dim(`Model: ${providerName}/${model}`));
         }
       }
+
+      // End trace and flush to Langfuse (no-op if not configured)
+      trace.end();
+      await tracer.shutdown().catch(() => {});
     });
 }
