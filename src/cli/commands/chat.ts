@@ -192,7 +192,7 @@ interface REPLCommand {
  * - RAG engine (which clears vector store and BM25 caches)
  * - Conversation context
  */
-function cleanupChatState(state: ChatState): void {
+function cleanupChatState(state: ChatState, ctx: CommandContext): void {
   // Dispose routing engine (clears all cached single-project engines)
   if (state.routingEngine) {
     state.routingEngine.dispose();
@@ -209,7 +209,7 @@ function cleanupChatState(state: ChatState): void {
   state.conversationContext.clear();
 
   // Shut down tracer (flushes pending Langfuse events, no-op if not configured)
-  state.tracer.shutdown().catch((err) => console.debug(`[tracer] shutdown error: ${err}`));
+  state.tracer.shutdown().catch((err) => ctx.debug(`[tracer] shutdown error: ${err}`));
 }
 
 // ============================================================================
@@ -1159,7 +1159,7 @@ const REPL_COMMANDS: REPLCommand[] = [
     description: 'Exit the chat',
     handler: async (_args, state, ctx) => {
       ctx.log(chalk.dim('Goodbye!'));
-      cleanupChatState(state);
+      cleanupChatState(state, ctx);
       return false; // Signal to exit REPL
     },
   },
@@ -2032,7 +2032,7 @@ async function runChatTUI(
     const cleanup = () => {
       if (!cleanedUp) {
         cleanedUp = true;
-        cleanupChatState(state);
+        cleanupChatState(state, ctx);
         tui.shutdown();
       }
     };
@@ -2346,7 +2346,7 @@ async function runChatREPL(
     const cleanup = () => {
       if (!cleanedUp) {
         cleanedUp = true;
-        cleanupChatState(state);
+        cleanupChatState(state, ctx);
       }
     };
 

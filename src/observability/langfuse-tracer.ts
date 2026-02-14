@@ -51,18 +51,19 @@ export interface LangfuseTracerConfig {
  * The observation object from startObservation() has .update() and .end().
  */
 function wrapSpan(obs: ReturnType<typeof startObservation>): SpanHandle {
-  return {
+  const handle: SpanHandle = {
     update(data: UpdateData): SpanHandle {
       obs.update({
         output: data.output,
         metadata: data.metadata,
       });
-      return this;
+      return handle;
     },
     end(): void {
       obs.end();
     },
   };
+  return handle;
 }
 
 /**
@@ -70,7 +71,7 @@ function wrapSpan(obs: ReturnType<typeof startObservation>): SpanHandle {
  * Includes usageDetails mapping for LLM token tracking.
  */
 function wrapGeneration(obs: ReturnType<typeof startObservation>): GenerationHandle {
-  return {
+  const handle: GenerationHandle = {
     update(data: UpdateData): GenerationHandle {
       obs.update({
         output: data.output,
@@ -83,12 +84,13 @@ function wrapGeneration(obs: ReturnType<typeof startObservation>): GenerationHan
           },
         }),
       });
-      return this;
+      return handle;
     },
     end(): void {
       obs.end();
     },
   };
+  return handle;
 }
 
 /**
@@ -96,7 +98,7 @@ function wrapGeneration(obs: ReturnType<typeof startObservation>): GenerationHan
  * Can create child spans and generations via parent.startObservation().
  */
 function wrapTrace(obs: ReturnType<typeof startObservation>): TraceHandle {
-  return {
+  const handle: TraceHandle = {
     span(options: SpanOptions): SpanHandle {
       const child = obs.startObservation(options.name, {
         input: options.input,
@@ -121,12 +123,13 @@ function wrapTrace(obs: ReturnType<typeof startObservation>): TraceHandle {
         output: data.output,
         metadata: data.metadata,
       });
-      return this;
+      return handle;
     },
     end(): void {
       obs.end();
     },
   };
+  return handle;
 }
 
 // ============================================================================
