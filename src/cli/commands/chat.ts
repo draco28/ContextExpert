@@ -1435,6 +1435,25 @@ async function handleQuestionWithAgent(
       state.conversationContext.addMessage({ role: 'assistant', content });
       await state.conversationContext.truncate();
     }
+
+    // Always-on local trace recording for chat turn (fire-and-forget)
+    if (state.currentProject) {
+      try {
+        const dbOps = getDatabase();
+        dbOps.insertTrace({
+          project_id: String(state.currentProject.id),
+          query: question,
+          retrieved_files: [],
+          top_k: 0,
+          latency_ms: 0,
+          answer: content || undefined,
+          retrieval_method: 'fusion',
+          metadata: { mode: 'chat-repl' },
+        });
+      } catch (err) {
+        ctx.debug(`Trace recording failed: ${err}`);
+      }
+    }
   } finally {
     state.agentAbortController = undefined;
   }
@@ -1502,6 +1521,25 @@ async function handleQuestionTUIWithAgent(
       state.conversationContext.addMessage({ role: 'user', content: question });
       state.conversationContext.addMessage({ role: 'assistant', content: responseContent });
       await state.conversationContext.truncate();
+    }
+
+    // Always-on local trace recording for chat turn (fire-and-forget)
+    if (state.currentProject) {
+      try {
+        const dbOps = getDatabase();
+        dbOps.insertTrace({
+          project_id: String(state.currentProject.id),
+          query: question,
+          retrieved_files: [],
+          top_k: 0,
+          latency_ms: 0,
+          answer: responseContent || undefined,
+          retrieval_method: 'fusion',
+          metadata: { mode: 'chat-tui' },
+        });
+      } catch (err) {
+        // Non-blocking: trace recording should never break chat
+      }
     }
   } catch (error) {
     state.agentAbortController = undefined;
@@ -2660,6 +2698,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
           currentProject,
           maxContextTokens: MAX_CONTEXT_TOKENS,
           maxIterations: 5,
+          tracer,
         });
         ctx.debug('ChatAgent created successfully (ReAct agent enabled)');
       } catch (error) {
