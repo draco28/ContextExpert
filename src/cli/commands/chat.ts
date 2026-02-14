@@ -209,7 +209,7 @@ function cleanupChatState(state: ChatState): void {
   state.conversationContext.clear();
 
   // Shut down tracer (flushes pending Langfuse events, no-op if not configured)
-  state.tracer.shutdown().catch(() => {});
+  state.tracer.shutdown().catch((err) => console.debug(`[tracer] shutdown error: ${err}`));
 }
 
 // ============================================================================

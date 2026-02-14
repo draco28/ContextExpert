@@ -578,6 +578,6 @@ export function createAskCommand(getContext: () => CommandContext): Command {
 
       // End trace and flush to Langfuse (no-op if not configured)
       trace.end();
-      await tracer.shutdown().catch(() => {});
+      await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
     });
 }
