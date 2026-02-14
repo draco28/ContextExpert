@@ -1426,7 +1426,7 @@ async function handleQuestionWithAgent(
       fileReferenceContext: fileReferenceContext || undefined,
       signal: state.agentAbortController.signal,
     });
-    const { content } = await renderAgentEventsREPL(events, ctx);
+    const { content, sources } = await renderAgentEventsREPL(events, ctx);
 
     ctx.log('');
 
@@ -1444,7 +1444,7 @@ async function handleQuestionWithAgent(
         dbOps.insertTrace({
           project_id: String(state.currentProject.id),
           query: question,
-          retrieved_files: [],
+          retrieved_files: sources.map((s) => s.filePath),
           top_k: 0,
           latency_ms: Math.round(performance.now() - turnStart),
           answer: content || undefined,
@@ -1532,7 +1532,7 @@ async function handleQuestionTUIWithAgent(
         dbOps.insertTrace({
           project_id: String(state.currentProject.id),
           query: question,
-          retrieved_files: [],
+          retrieved_files: sources.map((s) => s.filePath),
           top_k: 0,
           latency_ms: Math.round(performance.now() - turnStart),
           answer: responseContent || undefined,
