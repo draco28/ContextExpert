@@ -170,11 +170,12 @@ export const ObservabilityConfigSchema = z.object({
     .describe('Langfuse API host URL'),
 
   /**
-   * Trace sampling rate for Langfuse cloud sync.
+   * Trace sampling rate for local SQLite recording.
    *
-   * Controls what fraction of traces are sent to Langfuse.
-   * 1.0 = all traces, 0.5 = 50%, 0.0 = none.
-   * Local SQLite traces are always 100% regardless of this setting.
+   * Controls what fraction of interactions are recorded to eval_traces.
+   * 1.0 = all interactions (default), 0.5 = 50%, 0.0 = none.
+   * Reduces SQLite disk usage on high-traffic deployments.
+   * Langfuse cloud sync has its own sampling via the Langfuse SDK.
    * Default: 1.0
    */
   sample_rate: z
@@ -182,7 +183,7 @@ export const ObservabilityConfigSchema = z.object({
     .min(0)
     .max(1)
     .default(1.0)
-    .describe('Trace sampling rate for Langfuse (0.0-1.0)'),
+    .describe('Trace sampling rate for local SQLite recording (0.0-1.0)'),
 });
 
 export type ObservabilityConfig = z.infer<typeof ObservabilityConfigSchema>;
@@ -223,6 +224,8 @@ export interface EvalTrace {
   feedback: string | null;
   /** JSON-serialized custom metadata */
   metadata: string | null;
+  /** Langfuse trace ID for cross-referencing local and cloud traces */
+  langfuse_trace_id: string | null;
 }
 
 /**
@@ -241,6 +244,8 @@ export interface TraceInput {
   retrieval_method: 'dense' | 'bm25' | 'fusion';
   feedback?: 'positive' | 'negative';
   metadata?: Record<string, unknown>;
+  /** Langfuse trace ID for cross-referencing local and cloud traces */
+  langfuse_trace_id?: string;
 }
 
 /**

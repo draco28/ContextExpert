@@ -500,8 +500,8 @@ export class DatabaseOperations {
     const id = generateId();
 
     const stmt = this.db.prepare(`
-      INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, answer, retrieval_method, feedback, metadata)
-      VALUES (@id, @projectId, @query, @timestamp, @retrievedFiles, @topK, @latencyMs, @answer, @retrievalMethod, @feedback, @metadata)
+      INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, answer, retrieval_method, feedback, metadata, langfuse_trace_id)
+      VALUES (@id, @projectId, @query, @timestamp, @retrievedFiles, @topK, @latencyMs, @answer, @retrievalMethod, @feedback, @metadata, @langfuseTraceId)
     `);
 
     stmt.run({
@@ -516,6 +516,7 @@ export class DatabaseOperations {
       retrievalMethod: trace.retrieval_method,
       feedback: trace.feedback ?? null,
       metadata: trace.metadata ? JSON.stringify(trace.metadata) : null,
+      langfuseTraceId: trace.langfuse_trace_id ?? null,
     });
 
     return id;

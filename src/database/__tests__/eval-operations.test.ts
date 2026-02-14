@@ -58,6 +58,7 @@ describe('Eval Operations', () => {
       retrieval_method TEXT NOT NULL,
       feedback TEXT,
       metadata TEXT,
+      langfuse_trace_id TEXT,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
@@ -138,6 +139,7 @@ describe('Eval Operations', () => {
       expect(columnNames).toEqual([
         'id', 'project_id', 'query', 'timestamp', 'retrieved_files',
         'top_k', 'latency_ms', 'answer', 'retrieval_method', 'feedback', 'metadata',
+        'langfuse_trace_id',
       ]);
 
       // Verify NOT NULL constraints
@@ -275,6 +277,42 @@ describe('Eval Operations', () => {
       const traces = ops.getTraces({ feedback: 'negative' });
       expect(traces).toHaveLength(1);
       expect(traces[0].query).toBe('bad result');
+    });
+
+    it('stores and retrieves langfuse_trace_id', () => {
+      const projectId = createTestProject();
+
+      const traceId = ops.insertTrace({
+        project_id: projectId,
+        query: 'linked trace',
+        retrieved_files: ['src/index.ts'],
+        top_k: 5,
+        latency_ms: 120,
+        retrieval_method: 'fusion',
+        langfuse_trace_id: 'lf-abc-123',
+      });
+
+      const traces = ops.getTraces({ project_id: projectId });
+      expect(traces).toHaveLength(1);
+      expect(traces[0].id).toBe(traceId);
+      expect(traces[0].langfuse_trace_id).toBe('lf-abc-123');
+    });
+
+    it('stores null langfuse_trace_id when omitted', () => {
+      const projectId = createTestProject();
+
+      ops.insertTrace({
+        project_id: projectId,
+        query: 'no langfuse',
+        retrieved_files: [],
+        top_k: 5,
+        latency_ms: 80,
+        retrieval_method: 'dense',
+      });
+
+      const traces = ops.getTraces({ project_id: projectId });
+      expect(traces).toHaveLength(1);
+      expect(traces[0].langfuse_trace_id).toBeNull();
     });
 
     it('respects limit', () => {

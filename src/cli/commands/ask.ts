@@ -32,7 +32,7 @@ import { createLLMProvider } from '../../providers/llm.js';
 import { CLIError } from '../../errors/index.js';
 import type { Project } from '../../database/schema.js';
 import type { RAGSearchResult } from '../../agent/types.js';
-import { createTracer } from '../../observability/index.js';
+import { createTracer, shouldRecord } from '../../observability/index.js';
 import { getDatabase } from '../../database/index.js';
 import type { TraceInput } from '../../eval/types.js';
 
@@ -412,6 +412,7 @@ export function createAskCommand(getContext: () => CommandContext): Command {
 
       const ragResult: RAGSearchResult = await ragEngine.search(trimmedQuestion, {
         finalK: topK,
+        trace,
       });
 
       retrievalSpan.update({
@@ -476,18 +477,21 @@ export function createAskCommand(getContext: () => CommandContext): Command {
         trace.update({ output: { contextOnly: true, sourceCount: ragResult.sources.length } });
         traceEnded = true;
         trace.end();
-        try {
-          const dbOps = getDatabase();
-          dbOps.insertTrace({
-            project_id: String(project.id),
-            query: trimmedQuestion,
-            retrieved_files: ragResult.sources.map((s) => s.filePath),
-            top_k: topK,
-            latency_ms: Math.round(totalMs),
-            retrieval_method: 'fusion',
-          });
-        } catch (err) {
-          ctx.debug(`Trace recording failed: ${err}`);
+        if (shouldRecord(config.observability?.sample_rate ?? 1.0)) {
+          try {
+            const dbOps = getDatabase();
+            dbOps.insertTrace({
+              project_id: String(project.id),
+              query: trimmedQuestion,
+              retrieved_files: ragResult.sources.map((s) => s.filePath),
+              top_k: topK,
+              latency_ms: Math.round(totalMs),
+              retrieval_method: 'fusion',
+              langfuse_trace_id: trace.traceId,
+            });
+          } catch (err) {
+            ctx.debug(`Trace recording failed: ${err}`);
+          }
         }
         return;
       }
@@ -524,18 +528,21 @@ export function createAskCommand(getContext: () => CommandContext): Command {
         trace.update({ output: { noResults: true }, metadata: { totalMs } });
         traceEnded = true;
         trace.end();
-        try {
-          const dbOps = getDatabase();
-          dbOps.insertTrace({
-            project_id: String(project.id),
-            query: trimmedQuestion,
-            retrieved_files: [],
-            top_k: topK,
-            latency_ms: Math.round(totalMs),
-            retrieval_method: 'fusion',
-          });
-        } catch (err) {
-          ctx.debug(`Trace recording failed: ${err}`);
+        if (shouldRecord(config.observability?.sample_rate ?? 1.0)) {
+          try {
+            const dbOps = getDatabase();
+            dbOps.insertTrace({
+              project_id: String(project.id),
+              query: trimmedQuestion,
+              retrieved_files: [],
+              top_k: topK,
+              latency_ms: Math.round(totalMs),
+              retrieval_method: 'fusion',
+              langfuse_trace_id: trace.traceId,
+            });
+          } catch (err) {
+            ctx.debug(`Trace recording failed: ${err}`);
+          }
         }
         return;
       }
@@ -672,38 +679,41 @@ export function createAskCommand(getContext: () => CommandContext): Command {
       traceEnded = true;
       trace.end();
 
-      // Always-on local trace recording (fire-and-forget)
-      // Records every ask interaction to eval_traces for retrospective
+      // Always-on local trace recording (fire-and-forget, respects sample_rate)
+      // Records ask interactions to eval_traces for retrospective
       // analysis, trend tracking, and golden dataset capture.
-      try {
-        const dbOps = getDatabase();
-        const traceInput: TraceInput = {
-          project_id: String(project.id),
-          query: trimmedQuestion,
-          retrieved_files: ragResult.sources.map((s) => s.filePath),
-          top_k: topK,
-          latency_ms: Math.round(totalMs),
-          answer,
-          retrieval_method: 'fusion',
-          metadata: {
-            model: `${providerName}/${model}`,
-            retrievalMs: ragResult.metadata.retrievalMs,
-            assemblyMs: ragResult.metadata.assemblyMs,
-            generationMs,
-            tokensUsed: usage
-              ? {
-                  prompt: usage.promptTokens,
-                  completion: usage.completionTokens,
-                  total: usage.totalTokens,
-                }
-              : undefined,
-          },
-        };
-        dbOps.insertTrace(traceInput);
-        ctx.debug('Trace recorded to eval_traces');
-      } catch (err) {
-        // Non-blocking: trace recording should never break the command
-        ctx.debug(`Trace recording failed: ${err}`);
+      if (shouldRecord(config.observability?.sample_rate ?? 1.0)) {
+        try {
+          const dbOps = getDatabase();
+          const traceInput: TraceInput = {
+            project_id: String(project.id),
+            query: trimmedQuestion,
+            retrieved_files: ragResult.sources.map((s) => s.filePath),
+            top_k: topK,
+            latency_ms: Math.round(totalMs),
+            answer,
+            retrieval_method: 'fusion',
+            langfuse_trace_id: trace.traceId,
+            metadata: {
+              model: `${providerName}/${model}`,
+              retrievalMs: ragResult.metadata.retrievalMs,
+              assemblyMs: ragResult.metadata.assemblyMs,
+              generationMs,
+              tokensUsed: usage
+                ? {
+                    prompt: usage.promptTokens,
+                    completion: usage.completionTokens,
+                    total: usage.totalTokens,
+                  }
+                : undefined,
+            },
+          };
+          dbOps.insertTrace(traceInput);
+          ctx.debug('Trace recorded to eval_traces');
+        } catch (err) {
+          // Non-blocking: trace recording should never break the command
+          ctx.debug(`Trace recording failed: ${err}`);
+        }
       }
       } finally {
         if (!traceEnded) {

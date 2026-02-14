@@ -32,7 +32,7 @@ import {
 } from '../../search/index.js';
 import { CLIError } from '../../errors/index.js';
 import type { Project } from '../../database/schema.js';
-import { createTracer } from '../../observability/index.js';
+import { createTracer, shouldRecord } from '../../observability/index.js';
 import { getDatabase } from '../../database/index.js';
 import type { TraceInput } from '../../eval/types.js';
 
@@ -370,29 +370,32 @@ export function createSearchCommand(
       traceEnded = true;
       trace.end();
 
-      // Always-on local trace recording (fire-and-forget)
-      try {
-        const dbOps = getDatabase();
-        // For multi-project, record against the first project
-        const primaryProjectId = String(projects[0]!.id);
-        const traceInput: TraceInput = {
-          project_id: primaryProjectId,
-          query: trimmedQuery,
-          retrieved_files: results.map((r) => r.filePath),
-          top_k: topK,
-          latency_ms: Math.round(totalMs),
-          retrieval_method: 'fusion',
-          metadata: {
-            searchMs,
-            rerank: shouldRerank,
-            multiProject: isMultiProject,
-            projectsSearched: projectNames,
-          },
-        };
-        dbOps.insertTrace(traceInput);
-        ctx.debug('Trace recorded to eval_traces');
-      } catch (err) {
-        ctx.debug(`Trace recording failed: ${err}`);
+      // Always-on local trace recording (fire-and-forget, respects sample_rate)
+      if (shouldRecord(config.observability?.sample_rate ?? 1.0)) {
+        try {
+          const dbOps = getDatabase();
+          // For multi-project, record against the first project
+          const primaryProjectId = String(projects[0]!.id);
+          const traceInput: TraceInput = {
+            project_id: primaryProjectId,
+            query: trimmedQuery,
+            retrieved_files: results.map((r) => r.filePath),
+            top_k: topK,
+            latency_ms: Math.round(totalMs),
+            retrieval_method: 'fusion',
+            langfuse_trace_id: trace.traceId,
+            metadata: {
+              searchMs,
+              rerank: shouldRerank,
+              multiProject: isMultiProject,
+              projectsSearched: projectNames,
+            },
+          };
+          dbOps.insertTrace(traceInput);
+          ctx.debug('Trace recorded to eval_traces');
+        } catch (err) {
+          ctx.debug(`Trace recording failed: ${err}`);
+        }
       }
       } finally {
         if (!traceEnded) {

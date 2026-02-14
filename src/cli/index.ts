@@ -17,6 +17,7 @@ import { createRemoveCommand } from './commands/remove.js';
 import { createSearchCommand } from './commands/search.js';
 import { createStatusCommand } from './commands/status.js';
 import { createCheckCommand } from './commands/check.js';
+import { createEvalCommand } from './commands/eval.js';
 import {
   handleError,
   createGlobalErrorHandler,
@@ -136,6 +137,9 @@ program.addCommand(createStatusCommand(() => createContext(getGlobalOptions())))
 
 // Check command - project health check for agents
 program.addCommand(createCheckCommand(() => createContext(getGlobalOptions())));
+
+// Eval command - evaluation and trace analysis
+program.addCommand(createEvalCommand(() => createContext(getGlobalOptions())));
 
 // ============================================================================
 // ERROR HANDLING & EXECUTION

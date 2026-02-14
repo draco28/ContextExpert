@@ -101,6 +101,8 @@ export interface GenerationHandle {
  * Returned by Tracer.trace(). Use to create child spans and generations.
  */
 export interface TraceHandle {
+  /** The trace ID (Langfuse trace ID when remote, undefined for noop) */
+  readonly traceId?: string;
   /** Create a child span within this trace */
   span(options: SpanOptions): SpanHandle;
   /** Create a child generation (LLM call) within this trace */

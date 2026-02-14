@@ -53,6 +53,8 @@ export interface REPLRenderResult {
   content: string;
   /** Sources collected from RAG tool calls */
   sources: RAGSource[];
+  /** Langfuse trace ID for cross-referencing with local SQLite traces */
+  langfuseTraceId?: string;
 }
 
 /**
@@ -75,6 +77,7 @@ export async function renderAgentEventsREPL(
 ): Promise<REPLRenderResult> {
   const chunks: string[] = [];
   let sources: RAGSource[] = [];
+  let langfuseTraceId: string | undefined;
   let lastIteration = 0;
   let hasToolCalls = false;
   let isInThinkingPhase = false;
@@ -180,6 +183,7 @@ export async function renderAgentEventsREPL(
           ctx.log(chalk.bold('Sources:'));
           ctx.log(formatCitations(sources, { style: 'compact' }));
         }
+        langfuseTraceId = event.langfuseTraceId;
         break;
 
       case 'error':
@@ -194,6 +198,7 @@ export async function renderAgentEventsREPL(
   return {
     content: chunks.join(''),
     sources,
+    langfuseTraceId,
   };
 }
 
@@ -209,6 +214,8 @@ export interface TUIAdapterResult {
   stream: AsyncGenerator<TUIStreamChunk, void, unknown>;
   /** Get sources collected during the stream (available after stream completes) */
   getSources: () => RAGSource[];
+  /** Get Langfuse trace ID (available after stream completes) */
+  getLangfuseTraceId: () => string | undefined;
 }
 
 /**
@@ -230,6 +237,7 @@ export function adaptAgentEventsForTUI(
   tui: TUIController
 ): TUIAdapterResult {
   let collectedSources: RAGSource[] = [];
+  let collectedTraceId: string | undefined;
 
   async function* stream(): AsyncGenerator<TUIStreamChunk, void, unknown> {
     let lastIteration = 0;
@@ -297,6 +305,7 @@ export function adaptAgentEventsForTUI(
         case 'response_complete':
           // Collect sources for the caller to display after streamResponse()
           collectedSources = event.sources;
+          collectedTraceId = event.langfuseTraceId;
           tui.setActivity(AgentPhase.IDLE);
           break;
 
@@ -310,5 +319,6 @@ export function adaptAgentEventsForTUI(
   return {
     stream: stream(),
     getSources: () => collectedSources,
+    getLangfuseTraceId: () => collectedTraceId,
   };
 }

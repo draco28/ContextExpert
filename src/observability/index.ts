@@ -35,3 +35,6 @@ export { createTracer } from './factory.js';
 // Implementations (for testing or direct use)
 export { createNoopTracer } from './noop-tracer.js';
 export { createLangfuseTracer, type LangfuseTracerConfig } from './langfuse-tracer.js';
+
+// Sampling
+export { shouldRecord } from './sampling.js';

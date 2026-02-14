@@ -90,7 +90,7 @@ import {
   renderAgentEventsREPL,
   adaptAgentEventsForTUI,
 } from '../utils/agent-event-renderer.js';
-import { createTracer, type Tracer } from '../../observability/index.js';
+import { createTracer, shouldRecord, type Tracer } from '../../observability/index.js';
 
 // ============================================================================
 // Types
@@ -1426,7 +1426,7 @@ async function handleQuestionWithAgent(
       fileReferenceContext: fileReferenceContext || undefined,
       signal: state.agentAbortController.signal,
     });
-    const { content, sources } = await renderAgentEventsREPL(events, ctx);
+    const { content, sources, langfuseTraceId } = await renderAgentEventsREPL(events, ctx);
 
     ctx.log('');
 
@@ -1437,8 +1437,8 @@ async function handleQuestionWithAgent(
       await state.conversationContext.truncate();
     }
 
-    // Always-on local trace recording for chat turn (fire-and-forget)
-    if (state.currentProject) {
+    // Always-on local trace recording for chat turn (fire-and-forget, respects sample_rate)
+    if (state.currentProject && shouldRecord(state.config.observability?.sample_rate ?? 1.0)) {
       try {
         const dbOps = getDatabase();
         dbOps.insertTrace({
@@ -1449,6 +1449,7 @@ async function handleQuestionWithAgent(
           latency_ms: Math.round(performance.now() - turnStart),
           answer: content || undefined,
           retrieval_method: 'fusion',
+          langfuse_trace_id: langfuseTraceId,
           metadata: { mode: 'chat-repl' },
         });
       } catch (err) {
@@ -1506,7 +1507,7 @@ async function handleQuestionTUIWithAgent(
     fileReferenceContext: fileReferenceContext || undefined,
     signal: state.agentAbortController.signal,
   });
-  const { stream: tuiStream, getSources } = adaptAgentEventsForTUI(events, tui);
+  const { stream: tuiStream, getSources, getLangfuseTraceId } = adaptAgentEventsForTUI(events, tui);
 
   try {
     const responseContent = await tui.streamResponse(tuiStream);
@@ -1525,8 +1526,8 @@ async function handleQuestionTUIWithAgent(
       await state.conversationContext.truncate();
     }
 
-    // Always-on local trace recording for chat turn (fire-and-forget)
-    if (state.currentProject) {
+    // Always-on local trace recording for chat turn (fire-and-forget, respects sample_rate)
+    if (state.currentProject && shouldRecord(state.config.observability?.sample_rate ?? 1.0)) {
       try {
         const dbOps = getDatabase();
         dbOps.insertTrace({
@@ -1537,6 +1538,7 @@ async function handleQuestionTUIWithAgent(
           latency_ms: Math.round(performance.now() - turnStart),
           answer: responseContent || undefined,
           retrieval_method: 'fusion',
+          langfuse_trace_id: getLangfuseTraceId(),
           metadata: { mode: 'chat-tui' },
         });
       } catch (err) {

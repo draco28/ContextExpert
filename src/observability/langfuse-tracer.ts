@@ -99,6 +99,9 @@ function wrapGeneration(obs: ReturnType<typeof startObservation>): GenerationHan
  */
 function wrapTrace(obs: ReturnType<typeof startObservation>): TraceHandle {
   const handle: TraceHandle = {
+    get traceId(): string {
+      return obs.traceId;
+    },
     span(options: SpanOptions): SpanHandle {
       const child = obs.startObservation(options.name, {
         input: options.input,

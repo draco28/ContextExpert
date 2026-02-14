@@ -81,6 +81,7 @@ import {
   type RAGSearchResult,
   type RAGSource,
 } from './types.js';
+import type { TraceHandle } from '../observability/types.js';
 
 // ============================================================================
 // ADAPTER: FusionService → SDK Retriever Interface
@@ -230,7 +231,7 @@ export class ContextExpertRAGEngine {
    */
   async search(
     query: string,
-    options?: RAGEngineOptions
+    options?: RAGEngineOptions & { trace?: TraceHandle }
   ): Promise<RAGSearchResult> {
     const startTime = performance.now();
 
@@ -238,6 +239,12 @@ export class ContextExpertRAGEngine {
     const topK = options?.finalK ?? this.config.final_k;
     const maxTokens = options?.maxTokens ?? this.config.max_tokens;
     const ordering = options?.ordering ?? this.config.ordering;
+
+    // Create child span for SDK-internal search timing (no-op if no trace)
+    const span = options?.trace?.span({
+      name: 'rag-engine-search',
+      input: { query, topK, maxTokens },
+    });
 
     try {
       // Delegate to SDK's RAGEngineImpl
@@ -250,8 +257,31 @@ export class ContextExpertRAGEngine {
       });
 
       const endTime = performance.now();
-      return this.toRAGSearchResult(result, endTime - startTime);
+      const searchResult = this.toRAGSearchResult(result, endTime - startTime);
+
+      // Update span with results (fire-and-forget)
+      span?.update({
+        output: {
+          sourceCount: searchResult.sources.length,
+          estimatedTokens: searchResult.estimatedTokens,
+          fromCache: searchResult.metadata.fromCache,
+        },
+        metadata: {
+          retrievalMs: searchResult.metadata.retrievalMs,
+          assemblyMs: searchResult.metadata.assemblyMs,
+          totalMs: searchResult.metadata.totalMs,
+        },
+      });
+      span?.end();
+
+      return searchResult;
     } catch (error) {
+      // End span with error metadata
+      span?.update({
+        metadata: { error: error instanceof Error ? error.message : String(error) },
+      });
+      span?.end();
+
       // Wrap SDK errors in our error type, preserving full context
       const originalError =
         error instanceof Error ? error : new Error(String(error));

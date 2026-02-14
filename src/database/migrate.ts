@@ -202,6 +202,17 @@ CREATE TABLE IF NOT EXISTS eval_results (
 CREATE INDEX IF NOT EXISTS idx_eval_results_run ON eval_results(eval_run_id);
     `.trim(),
   },
+  {
+    name: '005-add-langfuse-trace-id.sql',
+    sql: `
+-- Migration 005: Add Langfuse trace ID linking
+-- Links local SQLite traces to Langfuse cloud traces for cross-referencing
+ALTER TABLE eval_traces ADD COLUMN langfuse_trace_id TEXT;
+
+-- Index for looking up local traces by Langfuse trace ID
+CREATE INDEX IF NOT EXISTS idx_eval_traces_langfuse ON eval_traces(langfuse_trace_id);
+    `.trim(),
+  },
 ];
 
 /**

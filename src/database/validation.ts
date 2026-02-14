@@ -166,6 +166,7 @@ export const TraceInputSchema = z.object({
   retrieval_method: z.enum(['dense', 'bm25', 'fusion']),
   feedback: z.enum(['positive', 'negative']).optional(),
   metadata: z.record(z.unknown()).optional(),
+  langfuse_trace_id: z.string().optional(),
 });
 
 /**
@@ -246,6 +247,7 @@ export const EvalTraceRowSchema = z.object({
   retrieval_method: z.string(),
   feedback: z.string().nullable(),
   metadata: z.string().nullable(),
+  langfuse_trace_id: z.string().nullable(),
 });
 
 /** Type inferred from EvalTraceRowSchema */

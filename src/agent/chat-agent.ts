@@ -125,6 +125,8 @@ export type ChatAgentEvent =
       content: string;
       trace: ReActTrace;
       sources: RAGSource[];
+      /** Langfuse trace ID for cross-referencing with local SQLite traces */
+      langfuseTraceId?: string;
     }
   | {
       /** Error during agent execution */
@@ -367,6 +369,7 @@ export class ChatAgent {
               content: finalOutput,
               trace: event.trace,
               sources: [...this.pendingSources],
+              langfuseTraceId: this.currentTrace?.traceId,
             };
             break;
 
@@ -380,6 +383,7 @@ export class ChatAgent {
               // Graceful degradation: the agent exhausted iterations but has
               // accumulated thinking. Use the last thought as the response
               // rather than showing an error — the text was already streamed.
+              const traceId = this.currentTrace?.traceId;
               this.currentTrace?.update({
                 output: lastThoughtContent,
                 metadata: { maxIterationsExceeded: true },
@@ -398,6 +402,7 @@ export class ChatAgent {
                 content: lastThoughtContent,
                 trace: { steps: [], iterations: 0, totalTokens: 0, durationMs: 0 },
                 sources: [...this.pendingSources],
+                langfuseTraceId: traceId,
               };
             } else {
               // Other errors: end trace with error metadata, rollback
