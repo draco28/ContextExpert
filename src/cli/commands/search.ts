@@ -33,6 +33,8 @@ import {
 import { CLIError } from '../../errors/index.js';
 import type { Project } from '../../database/schema.js';
 import { createTracer } from '../../observability/index.js';
+import { getDatabase } from '../../database/index.js';
+import type { TraceInput } from '../../eval/types.js';
 
 // ============================================================================
 // Types
@@ -231,6 +233,8 @@ export function createSearchCommand(
       });
       ctx.debug(`Tracer: ${tracer.isRemote ? 'Langfuse' : 'noop'}`);
 
+      let traceEnded = false;
+      try {
       const { provider: embeddingProvider, model: embeddingModel, dimensions } =
         await createEmbeddingProvider(config.embedding, {
           onProgress: (p) => ctx.debug(`Embedding init: ${p.status}`),
@@ -245,6 +249,11 @@ export function createSearchCommand(
       // ─────────────────────────────────────────────────────────────────────
       // 5. Execute search (single-project vs multi-project paths)
       // ─────────────────────────────────────────────────────────────────────
+      const searchSpan = trace.span({
+        name: 'search-retrieval',
+        input: { query: trimmedQuery, topK, rerank: shouldRerank, multiProject: isMultiProject },
+      });
+      const searchStart = performance.now();
       let results: SearchResultWithContext[];
 
       if (isMultiProject) {
@@ -310,6 +319,13 @@ export function createSearchCommand(
         results = await fusionService.search(trimmedQuery, { topK });
       }
 
+      const searchMs = performance.now() - searchStart;
+      searchSpan.update({
+        output: { resultCount: results.length },
+        metadata: { searchMs, rerank: shouldRerank },
+      });
+      searchSpan.end();
+
       ctx.debug(`Found ${results.length} results`);
 
       // ─────────────────────────────────────────────────────────────────────
@@ -324,34 +340,65 @@ export function createSearchCommand(
           results: formatResultsJSON(results, { showProject: isMultiProject }),
         };
         console.log(JSON.stringify(jsonOutput, null, 2));
-        return;
-      }
-
-      // Human-readable output
-      if (results.length === 0) {
+      } else if (results.length === 0) {
+        // Human-readable empty results
         displayEmptyResults(ctx, trimmedQuery);
-        return;
+      } else {
+        // Human-readable results
+        const projectContext = isMultiProject
+          ? ` across ${projects.length} projects`
+          : ` in ${projectNames[0]}`;
+        ctx.log(
+          chalk.bold(`Found ${results.length} result${results.length === 1 ? '' : 's'}`) +
+            chalk.dim(` for "${trimmedQuery}"${projectContext}`)
+        );
+        ctx.log('');
+
+        const formattedResults = formatResults(results, {
+          showProject: isMultiProject,
+          snippetLength: 200,
+        });
+        ctx.log(formattedResults);
       }
-
-      // Header
-      const projectContext = isMultiProject
-        ? ` across ${projects.length} projects`
-        : ` in ${projectNames[0]}`;
-      ctx.log(
-        chalk.bold(`Found ${results.length} result${results.length === 1 ? '' : 's'}`) +
-          chalk.dim(` for "${trimmedQuery}"${projectContext}`)
-      );
-      ctx.log('');
-
-      // Results
-      const formattedResults = formatResults(results, {
-        showProject: isMultiProject,
-        snippetLength: 200,
-      });
-      ctx.log(formattedResults);
 
       // End trace and flush to Langfuse (no-op if not configured)
+      const totalMs = performance.now() - searchStart;
+      trace.update({
+        output: { resultCount: results.length },
+        metadata: { totalMs, rerank: shouldRerank, multiProject: isMultiProject },
+      });
+      traceEnded = true;
       trace.end();
-      await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
+
+      // Always-on local trace recording (fire-and-forget)
+      try {
+        const dbOps = getDatabase();
+        // For multi-project, record against the first project
+        const primaryProjectId = String(projects[0]!.id);
+        const traceInput: TraceInput = {
+          project_id: primaryProjectId,
+          query: trimmedQuery,
+          retrieved_files: results.map((r) => r.filePath),
+          top_k: topK,
+          latency_ms: Math.round(totalMs),
+          retrieval_method: 'fusion',
+          metadata: {
+            searchMs,
+            rerank: shouldRerank,
+            multiProject: isMultiProject,
+            projectsSearched: projectNames,
+          },
+        };
+        dbOps.insertTrace(traceInput);
+        ctx.debug('Trace recorded to eval_traces');
+      } catch (err) {
+        ctx.debug(`Trace recording failed: ${err}`);
+      }
+      } finally {
+        if (!traceEnded) {
+          trace.end();
+        }
+        await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
+      }
     });
 }

@@ -1419,13 +1419,14 @@ async function handleQuestionWithAgent(
 
   // Stream agent events to REPL (with abort signal for Ctrl+C)
   state.agentAbortController = new AbortController();
+  const turnStart = performance.now();
   ctx.log('');
   try {
     const events = state.chatAgent.streamQuestion(question, {
       fileReferenceContext: fileReferenceContext || undefined,
       signal: state.agentAbortController.signal,
     });
-    const { content } = await renderAgentEventsREPL(events, ctx);
+    const { content, sources } = await renderAgentEventsREPL(events, ctx);
 
     ctx.log('');
 
@@ -1434,6 +1435,25 @@ async function handleQuestionWithAgent(
       state.conversationContext.addMessage({ role: 'user', content: question });
       state.conversationContext.addMessage({ role: 'assistant', content });
       await state.conversationContext.truncate();
+    }
+
+    // Always-on local trace recording for chat turn (fire-and-forget)
+    if (state.currentProject) {
+      try {
+        const dbOps = getDatabase();
+        dbOps.insertTrace({
+          project_id: String(state.currentProject.id),
+          query: question,
+          retrieved_files: sources.map((s) => s.filePath),
+          top_k: 0,
+          latency_ms: Math.round(performance.now() - turnStart),
+          answer: content || undefined,
+          retrieval_method: 'fusion',
+          metadata: { mode: 'chat-repl' },
+        });
+      } catch (err) {
+        ctx.debug(`Trace recording failed: ${err}`);
+      }
     }
   } finally {
     state.agentAbortController = undefined;
@@ -1449,7 +1469,7 @@ async function handleQuestionWithAgent(
 async function handleQuestionTUIWithAgent(
   question: string,
   state: ChatState,
-  _ctx: CommandContext,
+  ctx: CommandContext,
   tui: TUIController
 ): Promise<void> {
   if (!state.chatAgent) {
@@ -1481,6 +1501,7 @@ async function handleQuestionTUIWithAgent(
 
   // Stream agent events through TUI adapter (with abort signal for Ctrl+C)
   state.agentAbortController = new AbortController();
+  const turnStart = performance.now();
   const events = state.chatAgent.streamQuestion(question, {
     fileReferenceContext: fileReferenceContext || undefined,
     signal: state.agentAbortController.signal,
@@ -1502,6 +1523,25 @@ async function handleQuestionTUIWithAgent(
       state.conversationContext.addMessage({ role: 'user', content: question });
       state.conversationContext.addMessage({ role: 'assistant', content: responseContent });
       await state.conversationContext.truncate();
+    }
+
+    // Always-on local trace recording for chat turn (fire-and-forget)
+    if (state.currentProject) {
+      try {
+        const dbOps = getDatabase();
+        dbOps.insertTrace({
+          project_id: String(state.currentProject.id),
+          query: question,
+          retrieved_files: sources.map((s) => s.filePath),
+          top_k: 0,
+          latency_ms: Math.round(performance.now() - turnStart),
+          answer: responseContent || undefined,
+          retrieval_method: 'fusion',
+          metadata: { mode: 'chat-tui' },
+        });
+      } catch (err) {
+        ctx.debug(`Trace recording failed: ${err}`);
+      }
     }
   } catch (error) {
     state.agentAbortController = undefined;
@@ -2660,6 +2700,7 @@ export function createChatCommand(getContext: () => CommandContext): Command {
           currentProject,
           maxContextTokens: MAX_CONTEXT_TOKENS,
           maxIterations: 5,
+          tracer,
         });
         ctx.debug('ChatAgent created successfully (ReAct agent enabled)');
       } catch (error) {
