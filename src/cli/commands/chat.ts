@@ -1419,6 +1419,7 @@ async function handleQuestionWithAgent(
 
   // Stream agent events to REPL (with abort signal for Ctrl+C)
   state.agentAbortController = new AbortController();
+  const turnStart = performance.now();
   ctx.log('');
   try {
     const events = state.chatAgent.streamQuestion(question, {
@@ -1445,7 +1446,7 @@ async function handleQuestionWithAgent(
           query: question,
           retrieved_files: [],
           top_k: 0,
-          latency_ms: 0,
+          latency_ms: Math.round(performance.now() - turnStart),
           answer: content || undefined,
           retrieval_method: 'fusion',
           metadata: { mode: 'chat-repl' },
@@ -1468,7 +1469,7 @@ async function handleQuestionWithAgent(
 async function handleQuestionTUIWithAgent(
   question: string,
   state: ChatState,
-  _ctx: CommandContext,
+  ctx: CommandContext,
   tui: TUIController
 ): Promise<void> {
   if (!state.chatAgent) {
@@ -1500,6 +1501,7 @@ async function handleQuestionTUIWithAgent(
 
   // Stream agent events through TUI adapter (with abort signal for Ctrl+C)
   state.agentAbortController = new AbortController();
+  const turnStart = performance.now();
   const events = state.chatAgent.streamQuestion(question, {
     fileReferenceContext: fileReferenceContext || undefined,
     signal: state.agentAbortController.signal,
@@ -1532,13 +1534,13 @@ async function handleQuestionTUIWithAgent(
           query: question,
           retrieved_files: [],
           top_k: 0,
-          latency_ms: 0,
+          latency_ms: Math.round(performance.now() - turnStart),
           answer: responseContent || undefined,
           retrieval_method: 'fusion',
           metadata: { mode: 'chat-tui' },
         });
       } catch (err) {
-        // Non-blocking: trace recording should never break chat
+        ctx.debug(`Trace recording failed: ${err}`);
       }
     }
   } catch (error) {

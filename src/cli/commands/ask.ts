@@ -396,7 +396,9 @@ export function createAskCommand(getContext: () => CommandContext): Command {
       });
       ctx.debug(`Tracer: ${tracer.isRemote ? 'Langfuse' : 'noop'}`);
 
-      ctx.debug('Creating RAG engine...');
+      let traceEnded = false;
+      try {
+        ctx.debug('Creating RAG engine...');
       const ragEngine = await createRAGEngine(config, String(project.id));
 
       // ─────────────────────────────────────────────────────────────────────
@@ -472,8 +474,8 @@ export function createAskCommand(getContext: () => CommandContext): Command {
 
         // End trace and record for context-only mode
         trace.update({ output: { contextOnly: true, sourceCount: ragResult.sources.length } });
+        traceEnded = true;
         trace.end();
-        await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
         try {
           const dbOps = getDatabase();
           dbOps.insertTrace({
@@ -520,8 +522,8 @@ export function createAskCommand(getContext: () => CommandContext): Command {
 
         // End trace and record for no-results case
         trace.update({ output: { noResults: true }, metadata: { totalMs } });
+        traceEnded = true;
         trace.end();
-        await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
         try {
           const dbOps = getDatabase();
           dbOps.insertTrace({
@@ -667,8 +669,8 @@ export function createAskCommand(getContext: () => CommandContext): Command {
           sourceCount: ragResult.sources.length,
         },
       });
+      traceEnded = true;
       trace.end();
-      await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
 
       // Always-on local trace recording (fire-and-forget)
       // Records every ask interaction to eval_traces for retrospective
@@ -702,6 +704,12 @@ export function createAskCommand(getContext: () => CommandContext): Command {
       } catch (err) {
         // Non-blocking: trace recording should never break the command
         ctx.debug(`Trace recording failed: ${err}`);
+      }
+      } finally {
+        if (!traceEnded) {
+          trace.end();
+        }
+        await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
       }
     });
 }

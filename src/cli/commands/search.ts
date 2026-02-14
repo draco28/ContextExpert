@@ -233,6 +233,8 @@ export function createSearchCommand(
       });
       ctx.debug(`Tracer: ${tracer.isRemote ? 'Langfuse' : 'noop'}`);
 
+      let traceEnded = false;
+      try {
       const { provider: embeddingProvider, model: embeddingModel, dimensions } =
         await createEmbeddingProvider(config.embedding, {
           onProgress: (p) => ctx.debug(`Embedding init: ${p.status}`),
@@ -365,8 +367,8 @@ export function createSearchCommand(
         output: { resultCount: results.length },
         metadata: { totalMs, rerank: shouldRerank, multiProject: isMultiProject },
       });
+      traceEnded = true;
       trace.end();
-      await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
 
       // Always-on local trace recording (fire-and-forget)
       try {
@@ -391,6 +393,12 @@ export function createSearchCommand(
         ctx.debug('Trace recorded to eval_traces');
       } catch (err) {
         ctx.debug(`Trace recording failed: ${err}`);
+      }
+      } finally {
+        if (!traceEnded) {
+          trace.end();
+        }
+        await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
       }
     });
 }
