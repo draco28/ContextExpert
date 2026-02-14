@@ -32,6 +32,7 @@ import {
 } from '../../search/index.js';
 import { CLIError } from '../../errors/index.js';
 import type { Project } from '../../database/schema.js';
+import { createTracer } from '../../observability/index.js';
 
 // ============================================================================
 // Types
@@ -221,6 +222,15 @@ export function createSearchCommand(
       const config = loadConfig();
       ctx.debug(`Embedding: ${config.embedding.model} (${config.embedding.provider})`);
 
+      // Create tracer (NoopTracer if Langfuse not configured)
+      const tracer = createTracer(config);
+      const trace = tracer.trace({
+        name: 'ctx-search',
+        input: trimmedQuery,
+        metadata: { projects: projectNames, topK },
+      });
+      ctx.debug(`Tracer: ${tracer.isRemote ? 'Langfuse' : 'noop'}`);
+
       const { provider: embeddingProvider, model: embeddingModel, dimensions } =
         await createEmbeddingProvider(config.embedding, {
           onProgress: (p) => ctx.debug(`Embedding init: ${p.status}`),
@@ -339,5 +349,9 @@ export function createSearchCommand(
         snippetLength: 200,
       });
       ctx.log(formattedResults);
+
+      // End trace and flush to Langfuse (no-op if not configured)
+      trace.end();
+      await tracer.shutdown().catch((err) => ctx.debug(`Tracer shutdown error: ${err}`));
     });
 }
