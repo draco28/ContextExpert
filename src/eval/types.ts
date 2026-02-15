@@ -517,6 +517,76 @@ export interface GoldenEntry {
 // ERROR TYPES
 // ============================================================================
 
+// ============================================================================
+// PYTHON BRIDGE TYPES
+// ============================================================================
+
+/**
+ * Result of checking whether Python and eval packages are available.
+ *
+ * Returned by PythonEvalBridge.checkAvailability() — never throws,
+ * always returns a result so callers can decide how to degrade gracefully.
+ */
+export interface PythonAvailability {
+  /** Whether the python executable was found and runs */
+  pythonFound: boolean;
+  /** Python version string (e.g., "3.11.5") or null if not found */
+  pythonVersion: string | null;
+  /** Whether the ragas package is importable */
+  ragasAvailable: boolean;
+  /** RAGAS version string or null */
+  ragasVersion: string | null;
+  /** Whether the deepeval package is importable */
+  deepevalAvailable: boolean;
+  /** DeepEval version string or null */
+  deepevalVersion: string | null;
+}
+
+/**
+ * RAGAS evaluation results returned from the Python subprocess.
+ *
+ * The Python script runs ragas.evaluate() and writes this JSON structure
+ * to a temp file, which the bridge reads back and validates with Zod.
+ */
+export interface RagasResults {
+  /** Aggregate scores per metric (0-1 range). Keys are metric names like "faithfulness", "answer_relevancy" */
+  scores: Record<string, number>;
+  /** Per-row detailed results for each question in the dataset */
+  details: Array<{
+    question: string;
+    scores: Record<string, number>;
+  }>;
+  /** Execution metadata for logging and debugging */
+  metadata: {
+    duration_seconds: number;
+    model_used: string;
+    metrics_evaluated: string[];
+  };
+}
+
+/**
+ * DeepEval evaluation results returned from the Python subprocess.
+ *
+ * Same structure as RagasResults but includes per-metric reasoning
+ * strings that DeepEval generates for each test case.
+ */
+export interface DeepEvalResults {
+  /** Aggregate scores per metric (0-1 range) */
+  scores: Record<string, number>;
+  /** Per-row detailed results with reasoning */
+  details: Array<{
+    input: string;
+    scores: Record<string, number>;
+    reasons: Record<string, string>;
+  }>;
+  /** Execution metadata */
+  metadata: {
+    duration_seconds: number;
+    model_used: string;
+    metrics_evaluated: string[];
+  };
+}
+
 /**
  * Error codes for eval/observability failures.
  *
