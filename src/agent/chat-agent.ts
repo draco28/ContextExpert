@@ -342,6 +342,9 @@ export class ChatAgent {
           case 'done':
             finalOutput = event.output;
 
+            // Capture traceId before ending (same pattern as error handler below)
+            const traceId = this.currentTrace?.traceId;
+
             // End trace with final output and ReAct metadata
             this.currentTrace?.update({
               output: finalOutput,
@@ -369,7 +372,7 @@ export class ChatAgent {
               content: finalOutput,
               trace: event.trace,
               sources: [...this.pendingSources],
-              langfuseTraceId: this.currentTrace?.traceId,
+              langfuseTraceId: traceId,
             };
             break;
 
