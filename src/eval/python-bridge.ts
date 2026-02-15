@@ -86,7 +86,7 @@ const RagasOutputSchema = z.object({
   details: z.array(
     z.object({
       question: z.string(),
-      scores: z.record(z.string(), z.number()),
+      scores: z.record(z.string(), z.number().min(0).max(1)),
     })
   ),
   metadata: z.object({
@@ -105,7 +105,7 @@ const DeepEvalOutputSchema = z.object({
   details: z.array(
     z.object({
       input: z.string(),
-      scores: z.record(z.string(), z.number()),
+      scores: z.record(z.string(), z.number().min(0).max(1)),
       reasons: z.record(z.string(), z.string()),
     })
   ),
