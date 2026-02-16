@@ -1070,22 +1070,39 @@ function createGoldenCaptureSubcommand(
         }
 
         // Step 7: Create golden entries from selected traces
+        const existingQueries = new Set(
+          listGoldenEntries(projectName).map((e) => e.query.toLowerCase()),
+        );
+
         let added = 0;
+        let skippedDupes = 0;
         for (const idx of selectedIndices) {
           const trace = traces[idx]!;
-          const files = parseRetrievedFiles(trace.retrieved_files);
+          const normalized = trace.query.toLowerCase();
 
+          // Skip if already in dataset or already added in this batch
+          if (existingQueries.has(normalized)) {
+            skippedDupes++;
+            continue;
+          }
+
+          const files = parseRetrievedFiles(trace.retrieved_files);
           addGoldenEntry(projectName, {
             query: trace.query,
             expectedFilePaths: files.length > 0 ? files : undefined,
             expectedAnswer: trace.answer ?? undefined,
             source: 'captured',
           });
+
+          existingQueries.add(normalized); // prevent batch-internal dupes
           added++;
         }
 
         ctx.log('');
         ctx.log(chalk.green(`\u2713 Added ${added} golden entries from traces`));
+        if (skippedDupes > 0) {
+          ctx.log(chalk.yellow(`  Skipped ${skippedDupes} duplicate(s) already in dataset`));
+        }
         ctx.log(chalk.dim(`Run: ctx eval golden list --project ${projectName}`));
       } finally {
         rl.close();
