@@ -706,7 +706,10 @@ function parseSelection(
   ctx: CommandContext,
 ): number[] {
   const rawParts = input.split(',').map((s) => s.trim()).filter(Boolean);
-  const parsed = rawParts.map((s) => ({ raw: s, num: parseInt(s, 10) - 1 }));
+  const parsed = rawParts.map((s) => {
+    const num = Number(s);
+    return { raw: s, num: Number.isInteger(num) ? num - 1 : NaN };
+  });
   const invalid = parsed.filter((p) => isNaN(p.num) || p.num < 0 || p.num >= max);
   if (invalid.length > 0) {
     ctx.warn(`Skipped invalid: ${invalid.map((p) => p.raw).join(', ')}`);
@@ -1140,6 +1143,7 @@ function createGoldenGenerateSubcommand(
       const db = getDb();
 
       // Step 2: Sample random chunks (exclude embedding BLOB for efficiency)
+      // Schema: src/database/migrations/001-initial.sql — chunks table
       const sampleSize = targetCount * 3; // Over-sample to account for LLM variance
       const chunks = db
         .prepare(
@@ -1168,6 +1172,10 @@ function createGoldenGenerateSubcommand(
         ctx.log(chalk.dim(`Generating questions from ${chunks.length} chunks using ${providerName}/${model}...\n`));
       }
 
+      // Build dedup set from existing golden entries to avoid duplicates
+      const existingQueries = new Set(
+        listGoldenEntries(projectName).map((e) => e.query.toLowerCase()),
+      );
       const generatedEntries: Array<{ query: string; filePath: string }> = [];
 
       const ora = (await import('ora')).default;
@@ -1186,6 +1194,9 @@ function createGoldenGenerateSubcommand(
 
           // Truncate chunk content to avoid excessive token usage
           const maxContentLen = 1500;
+          if (chunk.content.length > maxContentLen) {
+            ctx.debug(`Truncated chunk from ${chunk.file_path} (${chunk.content.length} → ${maxContentLen} chars)`);
+          }
           const content = chunk.content.length > maxContentLen
             ? chunk.content.substring(0, maxContentLen) + '\n... (truncated)'
             : chunk.content;
@@ -1223,6 +1234,9 @@ Questions:`,
 
           for (const query of questions) {
             if (generatedEntries.length >= targetCount) break;
+            const normalized = query.toLowerCase();
+            if (existingQueries.has(normalized)) continue;
+            if (generatedEntries.some((e) => e.query.toLowerCase() === normalized)) continue;
             generatedEntries.push({ query, filePath: chunk.file_path });
           }
 
