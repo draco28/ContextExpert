@@ -277,7 +277,7 @@ function formatTraceRow(trace: EvalTrace): string {
     minute: '2-digit',
   });
 
-  const files = JSON.parse(trace.retrieved_files) as string[];
+  const files = parseRetrievedFiles(trace.retrieved_files);
   const query = truncate(trace.query, 45);
   const latency = `${trace.latency_ms}ms`;
   const method = trace.retrieval_method;
@@ -675,6 +675,48 @@ function createTracesSubcommand(
 // ============================================================================
 
 /**
+ * Safely parse the retrieved_files JSON column from eval_traces.
+ *
+ * Returns an empty array if the JSON is corrupted or not an array,
+ * rather than crashing the command.
+ */
+function parseRetrievedFiles(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Parse a comma-separated selection string into valid 0-based indices.
+ *
+ * Warns the user about any invalid entries (non-numeric or out of range)
+ * rather than silently discarding them.
+ *
+ * @param input - Raw user input (e.g., "1,3,abc,5")
+ * @param max - Upper bound (exclusive) for valid indices
+ * @param ctx - CommandContext for warning output
+ * @returns Array of valid 0-based indices
+ */
+function parseSelection(
+  input: string,
+  max: number,
+  ctx: CommandContext,
+): number[] {
+  const rawParts = input.split(',').map((s) => s.trim()).filter(Boolean);
+  const parsed = rawParts.map((s) => ({ raw: s, num: parseInt(s, 10) - 1 }));
+  const invalid = parsed.filter((p) => isNaN(p.num) || p.num < 0 || p.num >= max);
+  if (invalid.length > 0) {
+    ctx.warn(`Skipped invalid: ${invalid.map((p) => p.raw).join(', ')}`);
+  }
+  return parsed
+    .map((p) => p.num)
+    .filter((i) => !isNaN(i) && i >= 0 && i < max);
+}
+
+/**
  * Prompt user for input using readline.
  *
  * Wraps rl.question() in a Promise for async/await usage.
@@ -963,7 +1005,7 @@ function createGoldenCaptureSubcommand(
 
       for (let i = 0; i < traces.length; i++) {
         const trace = traces[i]!;
-        const files = JSON.parse(trace.retrieved_files) as string[];
+        const files = parseRetrievedFiles(trace.retrieved_files);
         const timestamp = new Date(trace.timestamp).toLocaleString('en-US', {
           month: 'short',
           day: 'numeric',
@@ -1006,10 +1048,7 @@ function createGoldenCaptureSubcommand(
         }
 
         // Parse and validate selection
-        const selectedIndices = selectionInput
-          .split(',')
-          .map((s) => parseInt(s.trim(), 10) - 1)
-          .filter((i) => i >= 0 && i < traces.length);
+        const selectedIndices = parseSelection(selectionInput, traces.length, ctx);
 
         if (selectedIndices.length === 0) {
           ctx.log(chalk.yellow('No valid selections.'));
@@ -1031,7 +1070,7 @@ function createGoldenCaptureSubcommand(
         let added = 0;
         for (const idx of selectedIndices) {
           const trace = traces[idx]!;
-          const files = JSON.parse(trace.retrieved_files) as string[];
+          const files = parseRetrievedFiles(trace.retrieved_files);
 
           addGoldenEntry(projectName, {
             query: trace.query,
@@ -1244,10 +1283,7 @@ Questions:`,
             chalk.cyan('Enter numbers to keep (comma-separated): '),
           );
 
-          const keepIndices = keepInput
-            .split(',')
-            .map((s) => parseInt(s.trim(), 10) - 1)
-            .filter((i) => i >= 0 && i < generatedEntries.length);
+          const keepIndices = parseSelection(keepInput, generatedEntries.length, ctx);
 
           if (keepIndices.length === 0) {
             ctx.log(chalk.yellow('No valid selections. Cancelled.'));
