@@ -34,7 +34,6 @@ import {
   type EvalRunSummary,
   type RagasResults,
   type RetrievalMetrics,
-  type GoldenEntry,
 } from '../../eval/types.js';
 import { CLIError } from '../../errors/index.js';
 import { createLLMProvider } from '../../providers/llm.js';
@@ -680,7 +679,7 @@ function createTracesSubcommand(
  * Returns an empty array if the JSON is corrupted or not an array,
  * rather than crashing the command.
  */
-function parseRetrievedFiles(raw: string): string[] {
+export function parseRetrievedFiles(raw: string): string[] {
   try {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
@@ -700,7 +699,7 @@ function parseRetrievedFiles(raw: string): string[] {
  * @param ctx - CommandContext for warning output
  * @returns Array of valid 0-based indices
  */
-function parseSelection(
+export function parseSelection(
   input: string,
   max: number,
   ctx: CommandContext,
