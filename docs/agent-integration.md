@@ -382,6 +382,141 @@ ctx config path --json                  # {"path":"/Users/you/.ctx/config.toml"}
 
 ---
 
+## Eval Commands (v1.4.0+)
+
+Eval commands follow the same `--json` pattern. Use them for quality gates in agent workflows.
+
+### `ctx eval run --project <name> --json`
+
+Run batch evaluation against a golden dataset. Use as a quality gate after modifying search or indexing code.
+
+```json
+{
+  "run_id": "a1b2c3d4-...",
+  "project_name": "my-project",
+  "timestamp": "2026-02-17T10:30:00.000Z",
+  "query_count": 10,
+  "metrics": {
+    "mrr": 0.850,
+    "precision_at_k": 0.700,
+    "recall_at_k": 0.800,
+    "hit_rate": 0.900,
+    "ndcg": 0.820,
+    "map": 0.780
+  },
+  "thresholds": { "mrr": 0.7, "hit_rate": 0.85, "precision_at_k": 0.6 },
+  "passed": true,
+  "comparison": {
+    "previous_run_id": "e5f6g7h8-...",
+    "metric_changes": { "mrr": 0.050, "hit_rate": -0.020 }
+  },
+  "regressions": [],
+  "improvements": ["MRR"],
+  "ragas": null
+}
+```
+
+Key fields for agents:
+- `passed` — `true` when all threshold metrics meet or exceed targets
+- `regressions` — metric names that dropped by > 5 percentage points
+- `comparison.metric_changes` — signed deltas vs previous run (positive = improvement)
+
+---
+
+### `ctx eval report --project <name> --json`
+
+Get trend analysis across recent eval runs.
+
+```json
+{
+  "project_name": "my-project",
+  "run_count": 5,
+  "current_run_id": "a1b2c3d4-...",
+  "previous_run_id": "e5f6g7h8-...",
+  "trends": [
+    {
+      "metric": "mrr",
+      "current": 0.85,
+      "previous": 0.80,
+      "delta": 0.05,
+      "direction": "stable",
+      "is_regression": false,
+      "is_improvement": false
+    }
+  ],
+  "has_regressions": false,
+  "has_improvements": false
+}
+```
+
+Use `has_regressions` for automated quality gates. The `trends` array provides per-metric detail.
+
+---
+
+### `ctx eval traces --json`
+
+List recent interaction traces. Useful for debugging search quality issues.
+
+```bash
+ctx eval traces --project my-project --limit 5 --since 7d --type ask --json
+```
+
+```json
+{
+  "count": 5,
+  "traces": [
+    {
+      "id": "uuid",
+      "project_id": "uuid",
+      "query": "How does auth work?",
+      "timestamp": "2026-02-17T10:30:00.000Z",
+      "retrieved_files": ["src/auth/middleware.ts"],
+      "top_k": 5,
+      "latency_ms": 150,
+      "answer": "Authentication uses JWT...",
+      "retrieval_method": "fusion",
+      "feedback": null,
+      "metadata": { "tokensUsed": { "total": 950 } },
+      "langfuse_trace_id": null,
+      "trace_type": "ask"
+    }
+  ]
+}
+```
+
+| Option | Description |
+|--------|-------------|
+| `--project, -p` | Filter by project name |
+| `--limit, -l` | Maximum traces (default: 20) |
+| `--since, -s` | Recency filter: `7d`, `24h`, `2w` |
+| `--type, -t` | Trace type: `ask`, `search`, `chat` |
+
+---
+
+### `ctx eval golden list --project <name> --json`
+
+List golden dataset entries for a project.
+
+```json
+{
+  "count": 10,
+  "entries": [
+    {
+      "id": "uuid",
+      "query": "How does authentication work?",
+      "expectedFilePaths": ["src/auth/middleware.ts"],
+      "expectedAnswer": null,
+      "tags": ["auth"],
+      "source": "manual"
+    }
+  ]
+}
+```
+
+For full eval documentation, see the [Eval & Observability Guide](./eval-observability.md).
+
+---
+
 ## Error Handling
 
 All errors write JSON to **stderr** (not stdout) when `--json` is active.
@@ -431,6 +566,10 @@ Cross-project semantic search and RAG-powered Q&A via `ctx` CLI.
 - Get RAG context: `ctx ask "question" --context-only --project my-project --json`
 - Search code: `ctx search "query" --project my-project --json`
 - Full Q&A: `ctx ask "question" --project my-project --json`
+- Run evaluation: `ctx eval run --project my-project --json`
+- Eval trends: `ctx eval report --project my-project --json`
+- View traces: `ctx eval traces --project my-project --json`
+- Golden entries: `ctx eval golden list --project my-project --json`
 
 ### Key Flags
 - `--context-only` — Returns XML-formatted code context without LLM call (inject directly into your prompt)
@@ -441,4 +580,5 @@ Cross-project semantic search and RAG-powered Q&A via `ctx` CLI.
 1. `ctx check <project> --json` — Verify project is ready
 2. `ctx ask "question" --context-only --project <name> --json` — Get context
 3. Use the `context` field from the response as RAG context in your own prompt
+4. After code changes: `ctx eval run --project <name> --json` — Check `passed: true`
 ```

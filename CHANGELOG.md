@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-02-17
+
+### Added
+
+#### Evaluation System
+- **Golden Dataset Management** — Create, list, and manage golden test datasets for retrieval quality evaluation (`ctx eval golden add/list/capture/generate`) (#117, #131)
+- **Batch Evaluation Runner** — Run retrieval quality evaluation against golden datasets with 6 IR metrics: MRR, Precision@K, Recall@K, Hit Rate, NDCG, MAP (#115, #116)
+- **Eval Run Command** — `ctx eval run --project <name>` with formatted results table, regression detection, and `--json` output (#130)
+- **Eval Report & Trends** — View eval run history with per-metric trend arrows and regression detection (`ctx eval report`) (#132)
+- **RAGAS Integration** — Optional Python/RAGAS bridge for answer quality metrics: faithfulness, relevancy, context precision, context recall (#123)
+- **RAGAS/DeepEval Export** — Export eval data to RAGAS and DeepEval JSON formats for external framework consumption (#124)
+- **Eval Aggregator** — Cross-run trend computation with 5% regression threshold detection (#118)
+- **CI Eval Workflow** — GitHub Actions workflow for automated retrieval quality checks on PRs and weekly schedule (#125)
+- **CI Threshold Checker** — Quality gate script for CI pipelines with configurable thresholds via environment variables (#126)
+- **Eval Test Fixtures** — Fixture-based eval for CI without external dependencies (#127)
+- **E2E Integration Test** — Full eval cycle integration test covering golden dataset through report (#128)
+
+#### Observability
+- **Always-On Local Traces** — Automatic recording of every ask/search/chat interaction to SQLite `eval_traces` table (#119)
+- **Langfuse v4 Cloud Sync** — Optional OpenTelemetry-based tracing to Langfuse cloud with zero-overhead noop fallback (#122)
+- **RAG Pipeline Instrumentation** — Child spans for RAG engine search with query/topK/results metadata (#120)
+- **Trace Type Filtering** — Filter traces by command origin (ask, search, chat) with `--type` flag
+- **Langfuse Trace Linking** — Cross-reference local SQLite traces with Langfuse cloud traces via `langfuse_trace_id` column
+- **Trace Sampling** — Configurable `sample_rate` (0.0-1.0) for local trace recording
+
+#### Database
+- **Eval Tables Migration** — `eval_traces`, `eval_runs`, `eval_results` tables with foreign key cascades and indexes (#112, #113)
+- **Eval CRUD Operations** — `insertTrace`, `getTraces`, `insertEvalRun`, `getEvalRuns`, `insertEvalResult`, `getEvalResults` with Zod validation
+
+#### Configuration
+- **`[eval]` Config Section** — `golden_path`, `default_k`, `thresholds` (mrr, hit_rate, precision_at_k), `python_path`, `ragas_model` (#114, #129)
+- **`[observability]` Config Section** — `enabled`, `sample_rate`, `langfuse_public_key`, `langfuse_secret_key`, `langfuse_host` (#114, #129)
+
+#### Documentation
+- **Eval & Observability Guide** — Comprehensive standalone documentation at `docs/eval-observability.md`
+- **README Updates** — Eval commands, configuration, environment variables, and project structure
+- **Agent Integration Updates** — JSON schemas for eval commands in `docs/agent-integration.md`
+
+### Dependencies
+
+- Added `@langfuse/otel` ^4.6.1
+- Added `@langfuse/tracing` ^4.6.1
+- Added `@opentelemetry/sdk-node` ^0.212.0
+
 ## [1.3.1] - 2026-02-11
 
 ### Changed
@@ -159,7 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **No incremental reranking** - Full rerank on each query
 - **Memory usage** - Large codebases may require significant RAM during indexing
 
-[unreleased]: https://github.com/draco28/ContextExpert/compare/v1.3.1...HEAD
+[unreleased]: https://github.com/draco28/ContextExpert/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/draco28/ContextExpert/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/draco28/ContextExpert/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/draco28/ContextExpert/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/draco28/ContextExpert/compare/v1.1.0...v1.2.0

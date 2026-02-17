@@ -22,6 +22,8 @@ A cross-project context agent CLI for unified semantic search and RAG-powered Q&
 - **Smart routing** — Automatic project selection via heuristic + LLM fallback
 - **TUI chat mode** — Three-region terminal UI with status bar and scroll regions
 - **Result caching** — LRU cache for repeated queries, reducing latency
+- **Evaluation suite** — Batch retrieval quality testing with golden datasets, 6 IR metrics (MRR, Hit Rate, P@K, R@K, NDCG, MAP), trend tracking, and regression detection
+- **Observability** — Always-on local trace recording with optional Langfuse v4 cloud sync via OpenTelemetry
 
 ## Installation
 
@@ -195,6 +197,35 @@ ctx remove old-project --force --json
 |--------|-------------|
 | `--force, -f` | Confirm deletion (required) |
 
+### `ctx eval`
+
+Evaluation and observability commands for measuring and monitoring retrieval quality. See the [Eval & Observability Guide](./docs/eval-observability.md) for full documentation.
+
+```bash
+# Manage golden dataset
+ctx eval golden add --project my-project
+ctx eval golden generate --project my-project --count 5
+ctx eval golden list --project my-project
+
+# Run evaluation
+ctx eval run --project my-project
+ctx eval run --project my-project --ragas
+
+# View results
+ctx eval report --project my-project
+ctx eval traces --since 7d
+```
+
+| Subcommand | Description |
+|------------|-------------|
+| `eval run` | Run batch evaluation against golden dataset |
+| `eval report` | Show eval run history with trend arrows |
+| `eval traces` | List recent interaction traces |
+| `eval golden list` | List golden dataset entries |
+| `eval golden add` | Add a golden entry manually |
+| `eval golden capture` | Promote traces to golden entries |
+| `eval golden generate` | Generate golden entries using LLM |
+
 ## Configuration
 
 Configuration is stored in `~/.ctx/config.toml`. The database is stored in `~/.ctx/context.db`.
@@ -210,6 +241,11 @@ export OPENAI_API_KEY=sk-...            # For GPT models
 export OLLAMA_HOST=http://localhost:11434  # Custom Ollama URL
 export CTX_CONFIG_PATH=~/.ctx/config.toml  # Override config location
 export CTX_DB_PATH=~/.ctx/context.db       # Override database location
+
+# Langfuse observability (optional)
+export LANGFUSE_PUBLIC_KEY=pk-lf-...       # Langfuse cloud sync
+export LANGFUSE_SECRET_KEY=sk-lf-...       # Langfuse cloud sync
+export LANGFUSE_BASE_URL=https://cloud.langfuse.com  # Self-hosted override
 ```
 
 ### Config File
@@ -246,6 +282,24 @@ ordering = "sandwich"   # Context ordering: sandwich, chronological, relevance
 # Indexing settings (optional)
 [indexing]
 ignore_patterns = ["*.generated.ts", "migrations/**"]  # Additional gitignore-style patterns
+
+# Evaluation settings (optional)
+[eval]
+golden_path = "~/.ctx/eval"
+default_k = 5
+
+[eval.thresholds]
+mrr = 0.7
+hit_rate = 0.85
+precision_at_k = 0.6
+
+# Observability settings (optional)
+[observability]
+enabled = true
+sample_rate = 1.0
+# langfuse_public_key = "pk-lf-..."
+# langfuse_secret_key = "sk-lf-..."
+# langfuse_host = "https://cloud.langfuse.com"
 ```
 
 ## Providers
@@ -306,20 +360,26 @@ pnpm dev -- index ./test-project
 
 ```
 src/
-├── cli/        # Commands + TUI (controller, chat-area, status-line, input)
-├── agent/      # RAG engine, ReAct chat agent, query routing, tools
-├── search/     # Hybrid search: dense, BM25, fusion, reranking
-├── indexer/    # File scanning, chunking (Tree-sitter), embedding pipeline
-├── database/   # SQLite schema, operations, migrations
-├── providers/  # LLM providers: Anthropic, OpenAI, Ollama
-├── config/     # TOML config loading with Zod validation
-├── errors/     # Custom error classes and handler
-└── utils/      # Logging, path validation, table formatting
+├── cli/            # Commands + TUI (controller, chat-area, status-line, input)
+├── agent/          # RAG engine, ReAct chat agent, query routing, tools
+├── search/         # Hybrid search: dense, BM25, fusion, reranking
+├── indexer/        # File scanning, chunking (Tree-sitter), embedding pipeline
+├── database/       # SQLite schema, operations, migrations
+├── eval/           # Golden datasets, batch evaluation, metrics, RAGAS bridge
+├── observability/  # Tracer abstraction, Langfuse v4, local trace recording
+├── providers/      # LLM providers: Anthropic, OpenAI, Ollama
+├── config/         # TOML config loading with Zod validation
+├── errors/         # Custom error classes and handler
+└── utils/          # Logging, path validation, table formatting
 ```
 
 ## Agent Integration
 
 All commands support `--json` for structured output, making Context Expert a first-class tool for AI agents (Claude Code, Codex, OpenCode, etc.). See the [Agent Integration Guide](./docs/agent-integration.md) for JSON response schemas, recommended workflows, and error handling.
+
+## Evaluation & Observability
+
+Measure retrieval quality with golden datasets and track every interaction with built-in observability. See the [Eval & Observability Guide](./docs/eval-observability.md) for setup, configuration, and the full command reference.
 
 ## Contributing
 
