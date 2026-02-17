@@ -1450,6 +1450,7 @@ async function handleQuestionWithAgent(
           answer: content || undefined,
           retrieval_method: 'fusion',
           langfuse_trace_id: langfuseTraceId,
+          trace_type: 'chat',
           metadata: { mode: 'chat-repl' },
         });
       } catch (err) {
@@ -1539,6 +1540,7 @@ async function handleQuestionTUIWithAgent(
           answer: responseContent || undefined,
           retrieval_method: 'fusion',
           langfuse_trace_id: getLangfuseTraceId(),
+          trace_type: 'chat',
           metadata: { mode: 'chat-tui' },
         });
       } catch (err) {

@@ -226,6 +226,8 @@ export interface EvalTrace {
   metadata: string | null;
   /** Langfuse trace ID for cross-referencing local and cloud traces */
   langfuse_trace_id: string | null;
+  /** Command type that created this trace: 'ask', 'search', or 'chat' (null for legacy traces) */
+  trace_type: string | null;
 }
 
 /**
@@ -246,6 +248,8 @@ export interface TraceInput {
   metadata?: Record<string, unknown>;
   /** Langfuse trace ID for cross-referencing local and cloud traces */
   langfuse_trace_id?: string;
+  /** Command type that created this trace: 'ask', 'search', or 'chat' */
+  trace_type?: 'ask' | 'search' | 'chat';
 }
 
 /**
@@ -264,6 +268,8 @@ export interface TraceFilter {
   feedback?: 'positive' | 'negative';
   /** Maximum number of results to return */
   limit?: number;
+  /** Filter by trace type */
+  trace_type?: 'ask' | 'search' | 'chat';
 }
 
 // ============================================================================

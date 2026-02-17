@@ -488,6 +488,7 @@ export function createAskCommand(getContext: () => CommandContext): Command {
               latency_ms: Math.round(totalMs),
               retrieval_method: 'fusion',
               langfuse_trace_id: trace.traceId,
+              trace_type: 'ask',
             });
           } catch (err) {
             ctx.debug(`Trace recording failed: ${err}`);
@@ -539,6 +540,7 @@ export function createAskCommand(getContext: () => CommandContext): Command {
               latency_ms: Math.round(totalMs),
               retrieval_method: 'fusion',
               langfuse_trace_id: trace.traceId,
+              trace_type: 'ask',
             });
           } catch (err) {
             ctx.debug(`Trace recording failed: ${err}`);
@@ -694,6 +696,7 @@ export function createAskCommand(getContext: () => CommandContext): Command {
             answer,
             retrieval_method: 'fusion',
             langfuse_trace_id: trace.traceId,
+            trace_type: 'ask',
             metadata: {
               model: `${providerName}/${model}`,
               retrievalMs: ragResult.metadata.retrievalMs,

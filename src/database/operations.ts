@@ -500,8 +500,8 @@ export class DatabaseOperations {
     const id = generateId();
 
     const stmt = this.db.prepare(`
-      INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, answer, retrieval_method, feedback, metadata, langfuse_trace_id)
-      VALUES (@id, @projectId, @query, @timestamp, @retrievedFiles, @topK, @latencyMs, @answer, @retrievalMethod, @feedback, @metadata, @langfuseTraceId)
+      INSERT INTO eval_traces (id, project_id, query, timestamp, retrieved_files, top_k, latency_ms, answer, retrieval_method, feedback, metadata, langfuse_trace_id, trace_type)
+      VALUES (@id, @projectId, @query, @timestamp, @retrievedFiles, @topK, @latencyMs, @answer, @retrievalMethod, @feedback, @metadata, @langfuseTraceId, @traceType)
     `);
 
     stmt.run({
@@ -517,6 +517,7 @@ export class DatabaseOperations {
       feedback: trace.feedback ?? null,
       metadata: trace.metadata ? JSON.stringify(trace.metadata) : null,
       langfuseTraceId: trace.langfuse_trace_id ?? null,
+      traceType: trace.trace_type ?? null,
     });
 
     return id;
@@ -560,6 +561,11 @@ export class DatabaseOperations {
     if (filter.feedback) {
       conditions.push('feedback = @feedback');
       params.feedback = filter.feedback;
+    }
+
+    if (filter.trace_type) {
+      conditions.push('trace_type = @traceType');
+      params.traceType = filter.trace_type;
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';

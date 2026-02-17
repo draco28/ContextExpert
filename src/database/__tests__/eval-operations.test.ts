@@ -59,6 +59,7 @@ describe('Eval Operations', () => {
       feedback TEXT,
       metadata TEXT,
       langfuse_trace_id TEXT,
+      trace_type TEXT,
       FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
 
@@ -139,7 +140,7 @@ describe('Eval Operations', () => {
       expect(columnNames).toEqual([
         'id', 'project_id', 'query', 'timestamp', 'retrieved_files',
         'top_k', 'latency_ms', 'answer', 'retrieval_method', 'feedback', 'metadata',
-        'langfuse_trace_id',
+        'langfuse_trace_id', 'trace_type',
       ]);
 
       // Verify NOT NULL constraints

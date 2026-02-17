@@ -4,10 +4,13 @@
  * Parent command for evaluation and trace analysis:
  *   ctx eval run --project X         Run batch evaluation against golden dataset
  *   ctx eval run --project X --ragas  Include RAGAS answer quality metrics
+ *   ctx eval report --project X      Show eval run history with trend arrows
+ *   ctx eval report --project X --last 5  Analyze last 5 runs
  *   ctx eval traces                   List recent interaction traces
  *   ctx eval traces --project X       Filter by project
  *   ctx eval traces --limit 20        Limit results (default: 20)
  *   ctx eval traces --since 7d        Filter by recency (e.g., 7d, 24h, 2w)
+ *   ctx eval traces --type ask        Filter by trace type (ask, search, chat)
  */
 
 import { Command } from 'commander';
@@ -26,7 +29,7 @@ import { runEval, createEvalRunnerDeps } from '../../eval/runner.js';
 import { loadGoldenDataset, addGoldenEntry, listGoldenEntries } from '../../eval/golden.js';
 import { exportToRagas, writeExport } from '../../eval/exporter.js';
 import { PythonEvalBridge } from '../../eval/python-bridge.js';
-import { REGRESSION_THRESHOLD } from '../../eval/aggregator.js';
+import { REGRESSION_THRESHOLD, computeTrend, formatTrendReport } from '../../eval/aggregator.js';
 import {
   EvalConfigSchema,
   EvalError,
@@ -265,6 +268,22 @@ function truncate(str: string, maxLen: number): string {
 }
 
 /**
+ * Extract total token count from trace metadata JSON.
+ *
+ * ask.ts stores tokensUsed: { prompt, completion, total } in metadata.
+ * search/chat traces may not have this field.
+ */
+function extractTokenCount(metadata: string | null): number | null {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata);
+    return parsed?.tokensUsed?.total ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Format a trace for table display.
  */
 function formatTraceRow(trace: EvalTrace): string {
@@ -279,7 +298,12 @@ function formatTraceRow(trace: EvalTrace): string {
   const files = parseRetrievedFiles(trace.retrieved_files);
   const query = truncate(trace.query, 45);
   const latency = `${trace.latency_ms}ms`;
-  const method = trace.retrieval_method;
+  const traceType = (trace.trace_type ?? '-').padEnd(6);
+
+  const tokens = extractTokenCount(trace.metadata);
+  const tokensStr = tokens !== null
+    ? String(tokens).padStart(6)
+    : chalk.dim('    -');
 
   let feedback = chalk.dim('-');
   if (trace.feedback === 'positive') feedback = chalk.green('+');
@@ -293,10 +317,11 @@ function formatTraceRow(trace: EvalTrace): string {
   return [
     chalk.dim(trace.id.substring(0, 8)),
     timestamp.padEnd(18),
+    traceType,
     query.padEnd(47),
     String(files.length).padStart(3) + ' files',
     latency.padStart(7),
-    method.padEnd(6),
+    tokensStr,
     hasAnswer,
     feedback,
     langfuse,
@@ -594,8 +619,18 @@ function createTracesSubcommand(
     .option('-p, --project <name>', 'Filter by project name')
     .option('-l, --limit <number>', 'Maximum traces to show', '20')
     .option('-s, --since <duration>', 'Show traces since (e.g., 7d, 24h, 2w)')
-    .action(async (cmdOptions: { project?: string; limit: string; since?: string }) => {
+    .option('-t, --type <type>', 'Filter by trace type (ask, search, chat)')
+    .action(async (cmdOptions: { project?: string; limit: string; since?: string; type?: string }) => {
       const ctx = getContext();
+
+      // Validate --type if provided
+      const validTypes = ['ask', 'search', 'chat'];
+      if (cmdOptions.type && !validTypes.includes(cmdOptions.type)) {
+        throw new CLIError(
+          `Invalid --type value: ${cmdOptions.type}`,
+          `Allowed values: ${validTypes.join(', ')}`
+        );
+      }
 
       runMigrations();
       const db = getDatabase();
@@ -618,6 +653,7 @@ function createTracesSubcommand(
         project_id: projectId,
         start_date: startDate,
         limit,
+        trace_type: cmdOptions.type as 'ask' | 'search' | 'chat' | undefined,
       });
 
       // JSON output mode
@@ -655,10 +691,10 @@ function createTracesSubcommand(
       ctx.log('');
       ctx.log(
         chalk.dim(
-          'ID        Timestamp           Query                                            Files   Latency  Method  Ans  Fb  Langfuse'
+          'ID        Timestamp           Type    Query                                            Files   Latency  Tokens  Ans  Fb  Langfuse'
         )
       );
-      ctx.log(chalk.dim('\u2500'.repeat(140)));
+      ctx.log(chalk.dim('\u2500'.repeat(150)));
 
       for (const trace of traces) {
         ctx.log(formatTraceRow(trace));
@@ -666,6 +702,133 @@ function createTracesSubcommand(
 
       ctx.log('');
       ctx.log(chalk.dim(`Showing ${traces.length} trace(s). Use --limit to show more.`));
+    });
+}
+
+// ============================================================================
+// Report Subcommand
+// ============================================================================
+
+/**
+ * CLI options for `ctx eval report`.
+ */
+interface ReportCommandOptions {
+  project?: string;
+  last: string;
+}
+
+/**
+ * JSON output structure for `ctx eval report --json`.
+ */
+interface EvalReportOutputJSON {
+  project_name: string;
+  run_count: number;
+  current_run_id: string;
+  previous_run_id: string | null;
+  trends: Array<{
+    metric: string;
+    current: number;
+    previous: number | null;
+    delta: number | null;
+    direction: 'up' | 'down' | 'stable';
+    is_regression: boolean;
+    is_improvement: boolean;
+  }>;
+  has_regressions: boolean;
+  has_improvements: boolean;
+}
+
+/**
+ * Create the `ctx eval report` subcommand.
+ *
+ * Shows eval run history with metrics table and trend arrows.
+ * Queries recent eval runs from SQLite, computes per-metric deltas
+ * using the aggregator, and displays a formatted trend report.
+ *
+ * Reuses computeTrend() and formatTrendReport() from eval/aggregator.ts
+ * which were designed specifically for this command.
+ */
+function createReportSubcommand(
+  getContext: () => CommandContext
+): Command {
+  return new Command('report')
+    .description('Show eval run history with metrics and trend arrows')
+    .requiredOption('-p, --project <name>', 'Project to report on')
+    .option('-l, --last <number>', 'Number of recent runs to analyze', '10')
+    .action(async (cmdOptions: ReportCommandOptions) => {
+      const ctx = getContext();
+
+      // Step 1: Initialize database
+      runMigrations();
+      const db = getDatabase();
+
+      // Step 2: Resolve project
+      const project = db.getProjectByName(cmdOptions.project!);
+      if (!project) {
+        throw new CLIError(
+          `Project not found: ${cmdOptions.project}`,
+          'Run: ctx list  to see available projects'
+        );
+      }
+
+      // Step 3: Parse --last
+      const lastN = parseInt(cmdOptions.last, 10);
+      if (isNaN(lastN) || lastN < 1 || lastN > 1000) {
+        throw new CLIError(
+          'Invalid --last value',
+          'Must be a number between 1 and 1000'
+        );
+      }
+
+      // Step 4: Fetch eval runs
+      const runs = db.getEvalRuns(project.id, lastN);
+
+      // Step 5: Handle empty state
+      if (runs.length === 0) {
+        if (ctx.options.json) {
+          console.log(JSON.stringify({
+            project_name: cmdOptions.project,
+            run_count: 0,
+            current_run_id: null,
+            previous_run_id: null,
+            trends: [],
+            has_regressions: false,
+            has_improvements: false,
+          }, null, 2));
+          return;
+        }
+        ctx.log(chalk.yellow('No eval runs found.'));
+        ctx.log(chalk.dim(`Run: ctx eval run --project ${cmdOptions.project}`));
+        return;
+      }
+
+      // Step 6: Compute trend analysis
+      const trend = computeTrend(runs);
+
+      // Step 7: Output
+      if (ctx.options.json) {
+        const output: EvalReportOutputJSON = {
+          project_name: cmdOptions.project!,
+          run_count: trend.runCount,
+          current_run_id: trend.currentRunId,
+          previous_run_id: trend.previousRunId,
+          trends: trend.trends.map((t) => ({
+            metric: t.metric,
+            current: t.current,
+            previous: t.previous,
+            delta: t.delta,
+            direction: t.direction,
+            is_regression: t.isRegression,
+            is_improvement: t.isImprovement,
+          })),
+          has_regressions: trend.hasRegressions,
+          has_improvements: trend.hasImprovements,
+        };
+        console.log(JSON.stringify(output, null, 2));
+      } else {
+        ctx.log('');
+        ctx.log(formatTrendReport(trend));
+      }
     });
 }
 
@@ -1379,6 +1542,7 @@ export function createEvalCommand(
     .description('Evaluation and trace analysis commands');
 
   evalCmd.addCommand(createRunSubcommand(getContext));
+  evalCmd.addCommand(createReportSubcommand(getContext));
   evalCmd.addCommand(createTracesSubcommand(getContext));
   evalCmd.addCommand(createGoldenCommand(getContext));
 

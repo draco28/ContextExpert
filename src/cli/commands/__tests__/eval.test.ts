@@ -17,9 +17,10 @@ import {
   createEvalCommand,
 } from '../eval.js';
 import type { CommandContext } from '../../types.js';
-import type { EvalRunSummary, RetrievalMetrics } from '../../../eval/types.js';
+import type { EvalRunSummary, EvalRun, RetrievalMetrics } from '../../../eval/types.js';
 import * as database from '../../../database/index.js';
 import * as golden from '../../../eval/golden.js';
+import * as aggregator from '../../../eval/aggregator.js';
 import * as fs from 'node:fs';
 
 // ============================================================================
@@ -37,6 +38,15 @@ vi.mock('../../../eval/golden.js', () => ({
   addGoldenEntry: vi.fn(),
   loadGoldenDataset: vi.fn(),
 }));
+
+vi.mock('../../../eval/aggregator.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../eval/aggregator.js')>();
+  return {
+    ...actual,
+    computeTrend: vi.fn(),
+    formatTrendReport: vi.fn(),
+  };
+});
 
 vi.mock('node:fs', () => ({
   existsSync: vi.fn().mockReturnValue(true),
@@ -679,5 +689,275 @@ describe('golden add (non-interactive)', () => {
       expectedAnswer: 'The answer',
       tags: ['auth', 'security'],
     }));
+  });
+});
+
+// ============================================================================
+// Eval Report Subcommand Tests
+// ============================================================================
+
+describe('eval report', () => {
+  const mockProject = {
+    id: 'uuid-123',
+    name: 'test-project',
+    path: '/tmp/test-project',
+  };
+
+  const mockEvalRuns: EvalRun[] = [
+    {
+      id: 'run-001',
+      project_id: 'uuid-123',
+      timestamp: '2026-02-15T12:00:00.000Z',
+      dataset_version: '1.0',
+      query_count: 10,
+      metrics: JSON.stringify({
+        mrr: 0.85, precision_at_k: 0.65, recall_at_k: 0.72,
+        hit_rate: 0.90, ndcg: 0.78, map: 0.74,
+      }),
+      config: JSON.stringify({ top_k: 5 }),
+      notes: 'status:completed',
+    },
+    {
+      id: 'run-002',
+      project_id: 'uuid-123',
+      timestamp: '2026-02-14T12:00:00.000Z',
+      dataset_version: '1.0',
+      query_count: 10,
+      metrics: JSON.stringify({
+        mrr: 0.80, precision_at_k: 0.60, recall_at_k: 0.70,
+        hit_rate: 0.85, ndcg: 0.75, map: 0.70,
+      }),
+      config: JSON.stringify({ top_k: 5 }),
+      notes: 'status:completed',
+    },
+  ];
+
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  function createMockCtx(jsonMode = false): { ctx: CommandContext; logOutput: string[] } {
+    const logOutput: string[] = [];
+    return {
+      ctx: {
+        options: { verbose: false, json: jsonMode },
+        log: (msg: string) => logOutput.push(msg),
+        debug: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      logOutput,
+    };
+  }
+
+  async function runReport(ctx: CommandContext, args: string[]) {
+    const cmd = createEvalCommand(() => ctx);
+    const program = new Command();
+    program.addCommand(cmd);
+    await program.parseAsync(['node', 'test', 'eval', 'report', ...args]);
+  }
+
+  beforeEach(() => {
+    vi.mocked(database.runMigrations).mockReturnValue(undefined);
+    vi.mocked(database.getDatabase).mockReturnValue({
+      getProjectByName: vi.fn().mockReturnValue(mockProject),
+      getEvalRuns: vi.fn().mockReturnValue([]),
+    } as unknown as ReturnType<typeof database.getDatabase>);
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('shows helpful message when no eval runs found', async () => {
+    const { ctx, logOutput } = createMockCtx();
+    await runReport(ctx, ['--project', 'test-project']);
+    expect(logOutput.join('\n')).toContain('No eval runs found');
+  });
+
+  it('outputs empty JSON when no runs in JSON mode', async () => {
+    const { ctx } = createMockCtx(true);
+    await runReport(ctx, ['--project', 'test-project']);
+    const output = JSON.parse(consoleLogSpy.mock.calls[0]![0] as string);
+    expect(output.run_count).toBe(0);
+    expect(output.trends).toEqual([]);
+  });
+
+  it('calls computeTrend and formatTrendReport with runs', async () => {
+    const mockDb = {
+      getProjectByName: vi.fn().mockReturnValue(mockProject),
+      getEvalRuns: vi.fn().mockReturnValue(mockEvalRuns),
+    };
+    vi.mocked(database.getDatabase).mockReturnValue(
+      mockDb as unknown as ReturnType<typeof database.getDatabase>
+    );
+
+    const mockTrend = {
+      projectId: 'uuid-123',
+      runCount: 2,
+      currentRunId: 'run-001',
+      previousRunId: 'run-002',
+      trends: [
+        { metric: 'mrr', current: 0.85, previous: 0.80, delta: 0.05, direction: 'stable' as const, isRegression: false, isImprovement: false },
+      ],
+      hasRegressions: false,
+      hasImprovements: false,
+    };
+    vi.mocked(aggregator.computeTrend).mockReturnValue(mockTrend);
+    vi.mocked(aggregator.formatTrendReport).mockReturnValue('Formatted Report Output');
+
+    const { ctx, logOutput } = createMockCtx();
+    await runReport(ctx, ['--project', 'test-project']);
+
+    expect(aggregator.computeTrend).toHaveBeenCalledWith(mockEvalRuns);
+    expect(aggregator.formatTrendReport).toHaveBeenCalledWith(mockTrend);
+    expect(logOutput.join('\n')).toContain('Formatted Report Output');
+  });
+
+  it('respects --last option', async () => {
+    const mockDb = {
+      getProjectByName: vi.fn().mockReturnValue(mockProject),
+      getEvalRuns: vi.fn().mockReturnValue([]),
+    };
+    vi.mocked(database.getDatabase).mockReturnValue(
+      mockDb as unknown as ReturnType<typeof database.getDatabase>
+    );
+
+    const { ctx } = createMockCtx();
+    await runReport(ctx, ['--project', 'test-project', '--last', '5']);
+
+    expect(mockDb.getEvalRuns).toHaveBeenCalledWith('uuid-123', 5);
+  });
+
+  it('throws CLIError for non-existent project', async () => {
+    vi.mocked(database.getDatabase).mockReturnValue({
+      getProjectByName: vi.fn().mockReturnValue(undefined),
+      getEvalRuns: vi.fn(),
+    } as unknown as ReturnType<typeof database.getDatabase>);
+
+    const { ctx } = createMockCtx();
+    await expect(
+      runReport(ctx, ['--project', 'nope']),
+    ).rejects.toThrow(/Project not found/);
+  });
+
+  it('outputs structured JSON with trend data in JSON mode', async () => {
+    const mockDb = {
+      getProjectByName: vi.fn().mockReturnValue(mockProject),
+      getEvalRuns: vi.fn().mockReturnValue(mockEvalRuns),
+    };
+    vi.mocked(database.getDatabase).mockReturnValue(
+      mockDb as unknown as ReturnType<typeof database.getDatabase>
+    );
+
+    const mockTrend = {
+      projectId: 'uuid-123',
+      runCount: 2,
+      currentRunId: 'run-001',
+      previousRunId: 'run-002',
+      trends: [
+        { metric: 'mrr' as const, current: 0.85, previous: 0.80, delta: 0.05, direction: 'stable' as const, isRegression: false, isImprovement: false },
+      ],
+      hasRegressions: false,
+      hasImprovements: false,
+    };
+    vi.mocked(aggregator.computeTrend).mockReturnValue(mockTrend);
+
+    const { ctx } = createMockCtx(true);
+    await runReport(ctx, ['--project', 'test-project']);
+
+    const output = JSON.parse(consoleLogSpy.mock.calls[0]![0] as string);
+    expect(output.project_name).toBe('test-project');
+    expect(output.run_count).toBe(2);
+    expect(output.current_run_id).toBe('run-001');
+    expect(output.previous_run_id).toBe('run-002');
+    expect(output.trends).toHaveLength(1);
+    expect(output.trends[0].metric).toBe('mrr');
+  });
+});
+
+// ============================================================================
+// Eval Traces --type Filter Tests
+// ============================================================================
+
+describe('eval traces --type', () => {
+  const mockProject = {
+    id: 'uuid-123',
+    name: 'test-project',
+    path: '/tmp/test-project',
+  };
+
+  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+
+  function createMockCtx(jsonMode = false): { ctx: CommandContext; logOutput: string[] } {
+    const logOutput: string[] = [];
+    return {
+      ctx: {
+        options: { verbose: false, json: jsonMode },
+        log: (msg: string) => logOutput.push(msg),
+        debug: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      logOutput,
+    };
+  }
+
+  async function runTraces(ctx: CommandContext, args: string[]) {
+    const cmd = createEvalCommand(() => ctx);
+    const program = new Command();
+    program.addCommand(cmd);
+    await program.parseAsync(['node', 'test', 'eval', 'traces', ...args]);
+  }
+
+  beforeEach(() => {
+    vi.mocked(database.runMigrations).mockReturnValue(undefined);
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('passes trace_type filter to getTraces when --type is provided', async () => {
+    const mockDb = {
+      getProjectByName: vi.fn().mockReturnValue(mockProject),
+      getTraces: vi.fn().mockReturnValue([]),
+    };
+    vi.mocked(database.getDatabase).mockReturnValue(
+      mockDb as unknown as ReturnType<typeof database.getDatabase>
+    );
+
+    const { ctx } = createMockCtx();
+    await runTraces(ctx, ['--project', 'test-project', '--type', 'ask']);
+
+    expect(mockDb.getTraces).toHaveBeenCalledWith(
+      expect.objectContaining({ trace_type: 'ask' }),
+    );
+  });
+
+  it('does not filter by type when --type is omitted', async () => {
+    const mockDb = {
+      getProjectByName: vi.fn().mockReturnValue(mockProject),
+      getTraces: vi.fn().mockReturnValue([]),
+    };
+    vi.mocked(database.getDatabase).mockReturnValue(
+      mockDb as unknown as ReturnType<typeof database.getDatabase>
+    );
+
+    const { ctx } = createMockCtx();
+    await runTraces(ctx, ['--project', 'test-project']);
+
+    expect(mockDb.getTraces).toHaveBeenCalledWith(
+      expect.objectContaining({ trace_type: undefined }),
+    );
+  });
+
+  it('validates --type value and rejects invalid types', async () => {
+    const { ctx } = createMockCtx();
+    await expect(
+      runTraces(ctx, ['--type', 'invalid']),
+    ).rejects.toThrow(/Invalid --type value/);
   });
 });
