@@ -1,0 +1,106 @@
+name: Eval
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/search/**'
+      - 'src/agent/**'
+      - 'src/indexer/**'
+      - 'src/eval/**'
+      - 'fixtures/eval/**'
+      - 'scripts/check-eval-thresholds.js'
+      - 'scripts/run-ci-eval.ts'
+  schedule:
+    # Weekly Monday 6 AM UTC — catch regressions even without PRs
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: Retrieval Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Run fixture eval
+        run: pnpm tsx scripts/run-ci-eval.ts > eval-results.json
+
+      - name: Check quality thresholds
+        run: node scripts/check-eval-thresholds.js eval-results.json
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results.json
+          retention-days: 7
+
+  eval-ragas:
+    name: RAGAS Answer Quality (Optional)
+    runs-on: ubuntu-latest
+    needs: eval
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install RAGAS dependencies
+        run: pip install ragas
+
+      - name: Run RAGAS eval
+        if: env.OPENAI_API_KEY != ''
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+        run: |
+          echo "RAGAS CI eval requires indexed project — placeholder for future ticket"
