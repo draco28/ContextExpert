@@ -51,6 +51,7 @@ jobs:
         run: pnpm tsx scripts/run-ci-eval.ts > eval-results.json
 
       - name: Check quality thresholds
+        if: success()
         run: node scripts/check-eval-thresholds.js eval-results.json
 
       - name: Upload eval results
@@ -97,7 +98,7 @@ jobs:
         run: pip install ragas
 
       - name: Run RAGAS eval
-        if: env.OPENAI_API_KEY != ''
+        if: ${{ secrets.OPENAI_API_KEY != '' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
