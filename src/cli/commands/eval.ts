@@ -277,7 +277,8 @@ function extractTokenCount(metadata: string | null): number | null {
   if (!metadata) return null;
   try {
     const parsed = JSON.parse(metadata);
-    return parsed?.tokensUsed?.total ?? null;
+    const total = parsed?.tokensUsed?.total;
+    return typeof total === 'number' && Number.isFinite(total) ? total : null;
   } catch {
     return null;
   }
@@ -303,7 +304,7 @@ function formatTraceRow(trace: EvalTrace): string {
   const tokens = extractTokenCount(trace.metadata);
   const tokensStr = tokens !== null
     ? String(tokens).padStart(6)
-    : chalk.dim('    -');
+    : chalk.dim('-'.padStart(6));
 
   let feedback = chalk.dim('-');
   if (trace.feedback === 'positive') feedback = chalk.green('+');
