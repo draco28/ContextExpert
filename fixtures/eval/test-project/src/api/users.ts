@@ -5,6 +5,7 @@
  * All handlers require authentication via JWT middleware.
  */
 
+import bcrypt from 'bcrypt';
 import { getDatabase } from '../database/connection.js';
 import { logger } from '../utils/logger.js';
 
@@ -34,13 +35,15 @@ export function getUser(req: Request, res: Response): void {
 }
 
 /** POST /users — Create a new user */
-export function createUser(req: Request, res: Response): void {
-  const { email, name, password_hash } = req.body;
+export async function createUser(req: Request, res: Response): Promise<void> {
+  const { email, name, password } = req.body;
 
-  if (!email || !name || !password_hash) {
-    res.status(400).json({ error: 'email, name, and password_hash are required' });
+  if (!email || !name || !password) {
+    res.status(400).json({ error: 'email, name, and password are required' });
     return;
   }
+
+  const password_hash = await bcrypt.hash(password, 10);
 
   const db = getDatabase();
   try {
