@@ -54,6 +54,12 @@ jobs:
         if: success()
         run: node scripts/check-eval-thresholds.js eval-results.json
 
+      - name: Report eval failure
+        if: failure()
+        run: |
+          echo "::error::Eval pipeline failed. Check 'Run fixture eval' step for details."
+          echo "Eval results artifact (if any) will be uploaded for debugging."
+
       - name: Upload eval results
         if: always()
         uses: actions/upload-artifact@v4
