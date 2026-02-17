@@ -15,7 +15,7 @@
  *   pnpm tsx scripts/run-ci-eval.ts | node scripts/check-eval-thresholds.js
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -116,78 +116,97 @@ const CI_EVAL_CONFIG: EvalConfig = {
 
 async function main(): Promise<void> {
   // Step 1: Load and validate the fixture golden dataset
+  if (!existsSync(GOLDEN_PATH)) {
+    throw new Error(
+      `Fixture golden dataset not found at ${GOLDEN_PATH}. ` +
+      'Ensure fixtures/eval/golden.json exists (created by ticket #127).',
+    );
+  }
+
   const raw = readFileSync(GOLDEN_PATH, 'utf-8');
   const dataset: GoldenDataset = GoldenDatasetSchema.parse(JSON.parse(raw));
+
+  // Warn about duplicate queries (later entries silently overwrite in searchMap)
+  const seen = new Set<string>();
+  for (const entry of dataset.entries) {
+    if (seen.has(entry.query)) {
+      console.warn(`Warning: duplicate query in golden.json: "${entry.query}"`);
+    }
+    seen.add(entry.query);
+  }
 
   // Step 2: Set up temporary SQLite database
   const testDir = join(tmpdir(), `ctx-ci-eval-${Date.now()}`);
   mkdirSync(testDir, { recursive: true });
   const dbPath = join(testDir, 'ci-eval.db');
   const db = new Database(dbPath);
-  db.pragma('foreign_keys = ON');
-  db.exec(CREATE_TABLES_SQL);
 
-  const ops = new DatabaseOperations(db);
+  try {
+    db.pragma('foreign_keys = ON');
+    db.exec(CREATE_TABLES_SQL);
 
-  // Insert a fake project record (runEval stores eval_run records against it)
-  const projectId = `ci-eval-${Date.now()}`;
-  const now = new Date().toISOString();
-  db.prepare(
-    'INSERT INTO projects (id, name, path, indexed_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-  ).run(projectId, 'test-project', '/fixtures/test-project', now, now);
+    const ops = new DatabaseOperations(db);
 
-  // Step 3: Build "perfect search" mock
-  // Maps each golden query to its expectedFilePaths — simulates a RAG
-  // engine that always returns the correct files in the right order.
-  const searchMap: Record<string, string[]> = {};
-  for (const entry of dataset.entries) {
-    if (entry.expectedFilePaths && entry.expectedFilePaths.length > 0) {
-      searchMap[entry.query] = entry.expectedFilePaths;
+    // Insert a fake project record (runEval stores eval_run records against it)
+    const projectId = `ci-eval-${Date.now()}`;
+    const now = new Date().toISOString();
+    db.prepare(
+      'INSERT INTO projects (id, name, path, indexed_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+    ).run(projectId, 'test-project', '/fixtures/test-project', now, now);
+
+    // Step 3: Build "perfect search" mock
+    // Maps each golden query to its expectedFilePaths — simulates a RAG
+    // engine that always returns the correct files in the right order.
+    const searchMap: Record<string, string[]> = {};
+    for (const entry of dataset.entries) {
+      if (entry.expectedFilePaths && entry.expectedFilePaths.length > 0) {
+        searchMap[entry.query] = entry.expectedFilePaths;
+      }
     }
+
+    const search = async (query: string, _topK: number): Promise<EvalSearchResult> => ({
+      filePaths: searchMap[query] ?? [],
+      latencyMs: 5,
+    });
+
+    // Step 4: Construct runner dependencies and run eval
+    const deps: EvalRunnerDeps = {
+      search,
+      db: ops,
+      loadGoldenDataset: () => dataset,
+      projectId,
+      evalConfig: CI_EVAL_CONFIG,
+    };
+
+    const summary = await runEval({ projectName: 'test-project' }, deps);
+
+    // Step 5: Build EvalRunOutputJSON-compatible output
+    // Shape must match src/cli/commands/eval.ts:73-85 so that
+    // check-eval-thresholds.js can validate the metrics field.
+    const allPassed = summary.metrics.mrr >= CI_EVAL_CONFIG.thresholds.mrr
+      && summary.metrics.hit_rate >= CI_EVAL_CONFIG.thresholds.hit_rate
+      && summary.metrics.precision_at_k >= CI_EVAL_CONFIG.thresholds.precision_at_k;
+
+    const output = {
+      run_id: summary.run_id,
+      project_name: summary.project_name,
+      timestamp: summary.timestamp,
+      query_count: summary.query_count,
+      metrics: summary.metrics,
+      thresholds: CI_EVAL_CONFIG.thresholds,
+      passed: allPassed,
+      comparison: summary.comparison ?? null,
+      regressions: [],
+      improvements: [],
+      ragas: null,
+    };
+
+    console.log(JSON.stringify(output, null, 2));
+  } finally {
+    // Guaranteed cleanup even if runEval() throws
+    db.close();
+    rmSync(testDir, { recursive: true, force: true });
   }
-
-  const search = async (query: string, _topK: number): Promise<EvalSearchResult> => ({
-    filePaths: searchMap[query] ?? [],
-    latencyMs: 5,
-  });
-
-  // Step 4: Construct runner dependencies and run eval
-  const deps: EvalRunnerDeps = {
-    search,
-    db: ops,
-    loadGoldenDataset: () => dataset,
-    projectId,
-    evalConfig: CI_EVAL_CONFIG,
-  };
-
-  const summary = await runEval({ projectName: 'test-project' }, deps);
-
-  // Step 5: Build EvalRunOutputJSON-compatible output
-  // Shape must match src/cli/commands/eval.ts:73-85 so that
-  // check-eval-thresholds.js can validate the metrics field.
-  const allPassed = summary.metrics.mrr >= CI_EVAL_CONFIG.thresholds.mrr
-    && summary.metrics.hit_rate >= CI_EVAL_CONFIG.thresholds.hit_rate
-    && summary.metrics.precision_at_k >= CI_EVAL_CONFIG.thresholds.precision_at_k;
-
-  const output = {
-    run_id: summary.run_id,
-    project_name: summary.project_name,
-    timestamp: summary.timestamp,
-    query_count: summary.query_count,
-    metrics: summary.metrics,
-    thresholds: CI_EVAL_CONFIG.thresholds,
-    passed: allPassed,
-    comparison: summary.comparison ?? null,
-    regressions: [],
-    improvements: [],
-    ragas: null,
-  };
-
-  console.log(JSON.stringify(output, null, 2));
-
-  // Step 6: Cleanup
-  db.close();
-  rmSync(testDir, { recursive: true, force: true });
 }
 
 main().catch((err) => {
