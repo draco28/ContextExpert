@@ -28,7 +28,7 @@ import { EvalError } from './types.js';
  * Mirrors the GoldenDataset/GoldenEntry interfaces but provides
  * runtime validation for files that could be hand-edited or corrupted.
  */
-const GoldenEntrySchema = z.object({
+export const GoldenEntrySchema = z.object({
   id: z.string().min(1),
   query: z.string().min(1),
   expectedFilePaths: z.array(z.string()).optional(),
@@ -37,7 +37,7 @@ const GoldenEntrySchema = z.object({
   source: z.enum(['manual', 'generated', 'captured']),
 });
 
-const GoldenDatasetSchema = z.object({
+export const GoldenDatasetSchema = z.object({
   version: z.literal('1.0'),
   projectName: z.string().min(1),
   entries: z.array(GoldenEntrySchema),

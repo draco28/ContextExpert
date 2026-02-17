@@ -1,0 +1,17 @@
+{
+  "name": "test-project",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Minimal REST API with authentication for eval fixture testing",
+  "main": "src/api/router.ts",
+  "scripts": {
+    "start": "tsx src/api/router.ts",
+    "dev": "tsx watch src/api/router.ts"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "better-sqlite3": "^9.0.0",
+    "jsonwebtoken": "^9.0.0",
+    "bcrypt": "^5.1.0"
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "version": "1.0",
+  "projectName": "test-project",
+  "entries": [
+    {
+      "id": "fixture-001",
+      "query": "How does authentication work?",
+      "expectedFilePaths": ["src/auth/middleware.ts", "src/auth/login.ts"],
+      "tags": ["auth", "core"],
+      "source": "manual"
+    },
+    {
+      "id": "fixture-002",
+      "query": "Where is the JWT token verified?",
+      "expectedFilePaths": ["src/auth/middleware.ts"],
+      "tags": ["auth"],
+      "source": "manual"
+    },
+    {
+      "id": "fixture-003",
+      "query": "How are users created and managed?",
+      "expectedFilePaths": ["src/api/users.ts", "src/database/schema.ts"],
+      "tags": ["api", "users"],
+      "source": "manual"
+    },
+    {
+      "id": "fixture-004",
+      "query": "What is the database schema for users and sessions?",
+      "expectedFilePaths": ["src/database/schema.ts"],
+      "tags": ["database", "schema"],
+      "source": "manual"
+    },
+    {
+      "id": "fixture-005",
+      "query": "How does the API router handle routing?",
+      "expectedFilePaths": ["src/api/router.ts"],
+      "tags": ["api", "routing"],
+      "source": "manual"
+    },
+    {
+      "id": "fixture-006",
+      "query": "How is the database connection established?",
+      "expectedFilePaths": ["src/database/connection.ts", "src/config/index.ts"],
+      "tags": ["database", "config"],
+      "source": "manual"
+    },
+    {
+      "id": "fixture-007",
+      "query": "What configuration options are available?",
+      "expectedFilePaths": ["src/config/index.ts"],
+      "expectedAnswer": "Configuration includes port, dbPath, jwtSecret, and logLevel read from environment variables and optional TOML file.",
+      "tags": ["config"],
+      "source": "manual"
+    },
+    {
+      "id": "fixture-008",
+      "query": "Where is password hashing and login validation handled?",
+      "expectedFilePaths": ["src/auth/login.ts"],
+      "tags": ["auth", "security"],
+      "source": "manual"
+    }
+  ]
+}

@@ -10,6 +10,7 @@ tsup.config.ts
 *.spec.js
 vitest.config.ts
 coverage/
+fixtures/
 
 # Development files
 .github/
