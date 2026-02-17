@@ -213,6 +213,17 @@ ALTER TABLE eval_traces ADD COLUMN langfuse_trace_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_eval_traces_langfuse ON eval_traces(langfuse_trace_id);
     `.trim(),
   },
+  {
+    name: '006-add-trace-type.sql',
+    sql: `
+-- Migration 006: Add trace type column
+-- Enables filtering traces by command origin (ask, search, chat)
+ALTER TABLE eval_traces ADD COLUMN trace_type TEXT;
+
+-- Index for filtering traces by type
+CREATE INDEX IF NOT EXISTS idx_eval_traces_type ON eval_traces(trace_type);
+    `.trim(),
+  },
 ];
 
 /**

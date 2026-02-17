@@ -384,6 +384,7 @@ export function createSearchCommand(
             latency_ms: Math.round(totalMs),
             retrieval_method: 'fusion',
             langfuse_trace_id: trace.traceId,
+            trace_type: 'search',
             metadata: {
               searchMs,
               rerank: shouldRerank,

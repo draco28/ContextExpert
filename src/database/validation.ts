@@ -167,6 +167,7 @@ export const TraceInputSchema = z.object({
   feedback: z.enum(['positive', 'negative']).optional(),
   metadata: z.record(z.unknown()).optional(),
   langfuse_trace_id: z.string().optional(),
+  trace_type: z.enum(['ask', 'search', 'chat']).optional(),
 });
 
 /**
@@ -180,6 +181,7 @@ export const TraceFilterSchema = z.object({
   end_date: z.string().optional(),
   feedback: z.enum(['positive', 'negative']).optional(),
   limit: z.number().int().min(1).optional(),
+  trace_type: z.enum(['ask', 'search', 'chat']).optional(),
 });
 
 /**
@@ -248,6 +250,7 @@ export const EvalTraceRowSchema = z.object({
   feedback: z.string().nullable(),
   metadata: z.string().nullable(),
   langfuse_trace_id: z.string().nullable(),
+  trace_type: z.string().nullable(),
 });
 
 /** Type inferred from EvalTraceRowSchema */
